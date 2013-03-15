@@ -1170,11 +1170,22 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 		
 		pPlain = calloc(1, plain_len+1024);
 	}
+	else if (0 == plain_len)
+	{
+		if (nDataLen > 0 && nDataLen < 800000)
+		{
+			pPlain = calloc(1, 5120);
+			plain_len = -1;
+		}
+		else
+		{
+			LOGWARN0("TransGzipData, plain length = 0 and plain length >= 800KB, trans stop!");
+			return -1;
+		}
+	}
 	else
 	{
-		//pPlain = calloc(1, 5120);
-		//plain_len = -1;
-		LOGWARN0("TransGzipData, plain length <= 0 or plain length >= 10M, trans stop!");
+		LOGWARN0("TransGzipData, plain length < 0 or plain length >= 10M, trans stop!");
 		return -1;
 	}
 	
