@@ -324,16 +324,17 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				
 				return HTTP_APPEND_DROP_PACKET;
 			}
-		} 
+		}
+		else if (((pSession->ack + pSession->res0) == tcphead->seq) && (abs(tcphead->ack_seq - pSession->seq) <= 4380))
+		{
+			LOGDEBUG("Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+		}
 		else 
 		{
-			//if (bIsCurPack
-			//		&& ((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq)))
-					
-			if (bIsCurPack
+			if (bIsCurPack 
 				&& (((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq))
-					|| ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)
-					|| ((pSession->ack + pSession->res0) == tcphead->seq) ))
+					 || ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)))
 			{
 				if (pSession->later_pack_size != MAX_LATER_PACKETS)
 				{
@@ -362,13 +363,9 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			}
 			else
 			{
-				//if (bIsCurPack
-				//	&& ((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq)))
-				
 				if (!bIsCurPack
 					&& (((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq))
-						|| ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)
-						|| ((pSession->ack + pSession->res0) == tcphead->seq) ))
+						|| ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)))
 				{
 					return HTTP_APPEND_ADD_PACKET_LATER;
 				}
