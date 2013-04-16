@@ -60,7 +60,7 @@ struct s_flow_session
 };
 
 int FlowInit();
-int FilterPacketForFlow(const char* buffer, const struct iphdr* iphead);
+int FilterPacketForFlow(const struct iphdr* iphead);
 int AddServer(const char* server_buffer);
 int StopServerFlow(const char* server_buffer);
 int GetServerCount();

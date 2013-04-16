@@ -26,7 +26,7 @@ static struct s_flow_session* _flow_session = NULL;
 extern volatile int Living;
 pthread_mutex_t _flow_data_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static int PushFlowPack(const char* buffer, const struct iphdr* iphead, unsigned long server_ip, unsigned long client_ip);
+static int PushFlowPack(const struct iphdr* iphead, unsigned long server_ip, unsigned long client_ip);
 static struct s_flow_session* CleanFlowSession(int nIndex);
 static void *Flow_Thread(void* param);
 static int CompFlowSize(const void *p1, const void *p2);
@@ -70,7 +70,7 @@ int FlowInit()
 	return (_packets == NULL) ? -1 : 0;
 }
 
-int PushFlowPack(const char* buffer, const struct iphdr* iphead, unsigned long server_ip, unsigned long client_ip)
+int PushFlowPack(const struct iphdr* iphead, unsigned long server_ip, unsigned long client_ip)
 {	
 	struct s_flow_pack *pFlowPack = calloc(sizeof(struct s_flow_pack), 1);
 	ASSERT(pFlowPack != NULL);
@@ -103,7 +103,7 @@ int PushFlowPack(const char* buffer, const struct iphdr* iphead, unsigned long s
 	return nErr;
 }
 
-int FilterPacketForFlow(const char* buffer, const struct iphdr* iphead)
+int FilterPacketForFlow(const struct iphdr* iphead)
 {
 	int nRs = -1;
 	for (int i = 0; i < MAX_FLOW_SESSIONS; i++)
@@ -113,9 +113,9 @@ int FilterPacketForFlow(const char* buffer, const struct iphdr* iphead)
 			continue;
 		
 		if (iphead->saddr == pFSession->server_flow.server_ip)
-			nRs = PushFlowPack(buffer, iphead, iphead->saddr, iphead->daddr);
+			nRs = PushFlowPack(iphead, iphead->saddr, iphead->daddr);
 		else if (iphead->daddr == pFSession->server_flow.server_ip)
-			nRs = PushFlowPack(buffer, iphead, iphead->daddr, iphead->saddr);
+			nRs = PushFlowPack(iphead, iphead->daddr, iphead->saddr);
 	}
 
 	return nRs;

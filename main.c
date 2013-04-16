@@ -134,7 +134,7 @@ int main(int argc, char* argv[])
 	
 	while (Living) 
 	{
-		buffer = calloc(1,RECV_BUFFER_LEN); // GetBuffer(shmptr);
+		buffer = calloc(1, RECV_BUFFER_LEN); // GetBuffer(shmptr);
 		if (buffer == NULL)
 		{
 			sleep(1);
@@ -148,16 +148,34 @@ int main(int argc, char* argv[])
 				continue;
 
 			struct ether_header *ehead = (struct ether_header*)buffer;
-			if (ehead->ether_type == htons(ETHERTYPE_IP))
+			u_short eth_type = ntohs(ehead->ether_type);
+			if (ETHERTYPE_VLAN == eth_type)
 			{
-				struct iphdr *iphead = (struct iphdr*)(buffer+ETHER_HDR_LEN);
+			
+				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
+				//LOGDEBUG("vlan packet, eth_type = %x", eth_type);
+				//fprintf(stderr, "vlan packet, eth_type = %x \n", eth_type);
+			}
+			
+			if (ETHERTYPE_IP == eth_type)
+			{
+				struct iphdr *iphead = IPHDR(buffer);
 
+				/*
+				struct in_addr sip; 
+				struct in_addr dip; 
+		
+				sip.s_addr = iphead->saddr;
+				dip.s_addr = iphead->daddr;
+				char ssip[16], sdip[16];
+				fprintf(stderr, "%s => %s \n", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
+				*/
+				
 				// Flow filter
-				FilterPacketForFlow(buffer, iphead);
+				FilterPacketForFlow(iphead);
 				if (iphead->protocol == IPPROTO_TCP)
 				{
-					int ipheadlen = iphead->ihl<<2;
-					struct tcphdr *tcphead = (struct tcphdr*)(buffer+ETHER_HDR_LEN+ipheadlen);
+					struct tcphdr *tcphead = TCPHDR(iphead);
 
 					// Http filter.
 					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
