@@ -623,7 +623,7 @@ while_start:
 				
 				LOGINFO("%s:%d connect, accept successfully.", sip, nPort);
 
-				if (CLIENT_SOCKET_PORT == nPort)
+				if (nPort >= CLIENT_SOCKET_PORT_MIN && nPort <= CLIENT_SOCKET_PORT_MAX)
 				{
 					if (_client_socket > 0)
 					{

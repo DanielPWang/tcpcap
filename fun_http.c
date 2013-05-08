@@ -511,7 +511,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 					}
 				}
 			}
-			else if (strncmp(content_type+14, "application/octet-stream", 24) == 0)
+			else if ((strncmp(content_type+14, "application/octet-stream", 24) == 0)
+					   || (strncmp(content_type+14, "application/x-download", 22) == 0))
 			{
 				char* pszFileType = memmem(content, contentlen, ".pdf", 4);
 				if (pszFileType != NULL)
