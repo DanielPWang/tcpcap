@@ -3,7 +3,7 @@
 
 #define VER_MAJOR 1
 #define VER_MINOR 0
-#define VER_PATCH 7
+#define VER_PATCH 8
 
 #define MONITOR_COUNT 5
 
@@ -11,16 +11,20 @@
 #define CONFIG_PATH_FILE "/config/agent.conf"
 #define HTTP_HOST_PATH_FILE "./config/http_host_ip.lst"
 #define EXCLUDE_HOST_PATH_FILE "./config/exclude_host_ip.lst"
-#define VALUE_LENGTH_MAX  (1024*6)
+#define VALUE_LENGTH_MAX  (1024*60)
 extern const char* CONFIG_PATH;
 
 // capture
 #define RECV_BUFFER_LEN   4000 // 8192
 
 // HTTP
-#define MAX_HTTP_SESSIONS 2000
-#define MAX_HTTP_PACKETS  5000
-#define HTTP_TIMEOUT      25	// s
+#define MAX_HTTP_SESSIONS 6000
+#define MAX_HTTP_PACKETS  20000
+#define HTTP_TIMEOUT      55	// s
+//#define MAX_HTTP_SESSIONS 2000
+//#define MAX_HTTP_PACKETS  5000
+//#define HTTP_TIMEOUT      25	// s
+
 #define MAX_LATER_PACKETS 40
 
 // Flow
