@@ -980,9 +980,9 @@ int HttpInit()
 	char szMaxSessionCount[10] = {0};
 	char szMaxPacketCount[10] = {0};
 	char szHttpTimeout[10] = {0};
-	GetValue(CONFIG_PATH, "max_session_count", szMaxSessionCount, 6);
-	GetValue(CONFIG_PATH, "max_packet_count", szMaxPacketCount, 6);
-	GetValue(CONFIG_PATH, "http_timeout", szHttpTimeout, 3);
+	GetValue(CONFIG_PATH, "max_session_count", szMaxSessionCount, 7);
+	GetValue(CONFIG_PATH, "max_packet_count", szMaxPacketCount, 7);
+	GetValue(CONFIG_PATH, "http_timeout", szHttpTimeout, 4);
 	
 	g_nMaxHttpSessionCount = atoi(szMaxSessionCount);
 	if (g_nMaxHttpSessionCount < 500 || g_nMaxHttpSessionCount > 100000)
