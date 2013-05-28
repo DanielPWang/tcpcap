@@ -36,6 +36,10 @@ pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct queue_t *_packets = NULL;
 
+static time_t _push_pack_last_time = 0;
+//static time_t _new_session_last_time = 0;
+
+
 static int g_nCountWholeContentFull = 0;
 static int g_nDropCountForPacketFull = 0;
 static int g_nDropCountForSessionFull = 0;
@@ -46,6 +50,11 @@ static int g_nChunked = 0;
 static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
 static uint64_t g_nHttpLen = 0;
+static uint64_t g_nPushedPackCount = 0;
+static int g_nSessionCount = 0;
+static int g_nMaxUsedPackSize = 0;
+static int g_nMaxUsedSessionSize = 0;
+
 
 static int g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 static int g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
@@ -110,6 +119,34 @@ int isRelation(const struct iphdr *ip, const struct tcphdr *tcp,
 {
 	// TODO
 	return 1;
+}
+
+void ShowLastLogInfo()
+{
+	int nCurSessionUsedCount = g_nMaxHttpSessionCount - len_queue(_idl_session);
+
+	LOGINFO("\n \
+	g_nDropCountForPacketFull = %d \n \
+	g_nDropCountForSessionFull = %d \n \
+	g_nDropCountForImage = %d \n \
+	g_nTimeOutCount = %d \n \
+	g_nReusedCount = %d \n \
+	g_nPushedPackCount = %llu \n \
+	g_nSessionCount = %d \n \
+	g_nMaxUsedPackSize = %d \n \
+	g_nMaxUsedSessionSize = %d \n \
+	nCurSessionUsedCount = %d \n \
+	g_nHttpLen = %llu \n", g_nDropCountForPacketFull, 
+	g_nDropCountForSessionFull, 
+	g_nDropCountForImage,
+	g_nTimeOutCount,
+	g_nReusedCount,
+	g_nPushedPackCount,
+	g_nSessionCount,
+	g_nMaxUsedPackSize,
+	g_nMaxUsedSessionSize,
+	nCurSessionUsedCount,
+	g_nHttpLen);
 }
 
 struct tcp_session* GetHttpSession(const struct iphdr* iphead, const struct tcphdr* tcphead)
@@ -237,6 +274,7 @@ int NewHttpSession(const char* packet)
 			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout) 
 			{
 				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
+				LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
 				CleanHttpSession(pREQ);
 				break;
 			} 
@@ -290,7 +328,15 @@ int NewHttpSession(const char* packet)
 	pIDL->request_head_len = contentlen+1;
 		
 	LOGDEBUG("Session[%d]Start request in NewHttpSession, content= %s", pIDL->index, content);
-	
+
+	int nSessionSize = g_nMaxHttpSessionCount - len_queue(_idl_session);
+	if (nSessionSize > g_nMaxUsedSessionSize)
+	{
+		g_nMaxUsedSessionSize = nSessionSize;
+	}
+		
+	LOGINFO("********* Current Session Count = %d , Max Used Session Buffer Size = %d ! *********", ++g_nSessionCount, g_nMaxUsedSessionSize);	
+
 	return index;
 }
 
@@ -848,6 +894,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		if (tv->tv_sec-pREQ->update > g_nHttpTimeout) 
 		{
 			LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
+			LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
 			CleanHttpSession(pREQ);
 			continue;
 		}
@@ -903,6 +950,12 @@ void *HTTP_Thread(void* param)
 	volatile int *active = (int*)param;
 	while (*active)
 	{
+		int nPackSize = len_queue(_packets);
+		if (nPackSize > g_nMaxUsedPackSize)
+		{
+			g_nMaxUsedPackSize = nPackSize;
+		}
+		
 		const char* packet = pop_queue(_packets);
 		if (packet == NULL) {
 			sleep(0);
@@ -932,7 +985,7 @@ void *HTTP_Thread(void* param)
 			{
 				if (nRes == -3) 
 				{
-					LOGDEBUG("Content is not html data. drop count = %d", ++g_nDropCountForImage);
+					LOGINFO("Content is not html data. drop count = %d", ++g_nDropCountForImage);
 				}
 				else if (nRes == -1) 
 				{
@@ -947,14 +1000,13 @@ void *HTTP_Thread(void* param)
 						LOGWARN("_http_session is full. drop count = %d, drop content = %s", ++g_nDropCountForSessionFull, content);
 						*enter = '\r';
 
-						LOGINFO("g_nFlagGetData = %d", g_nFlagGetData);
-						LOGINFO("g_nFlagSendData = %d", g_nFlagSendData);
+						LOGDEBUG("g_nFlagGetData = %d", g_nFlagGetData);
+						LOGDEBUG("g_nFlagSendData = %d", g_nFlagSendData);
 					}
 				}
 				free((void*)packet);
 			}
 
-			//LOGWARN("g_nDropCountForSessionFull  = %d, g_nDropCountForPacketFull = %d", g_nDropCountForSessionFull, g_nDropCountForPacketFull);
 			continue;
 		}
 
@@ -985,11 +1037,11 @@ int HttpInit()
 	GetValue(CONFIG_PATH, "http_timeout", szHttpTimeout, 4);
 	
 	g_nMaxHttpSessionCount = atoi(szMaxSessionCount);
-	if (g_nMaxHttpSessionCount < 500 || g_nMaxHttpSessionCount > 100000)
+	if (g_nMaxHttpSessionCount < 50 || g_nMaxHttpSessionCount > 100000)
 		g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 	
 	g_nMaxHttpPacketCount = atoi(szMaxPacketCount);
-	if (g_nMaxHttpPacketCount < 1000 || g_nMaxHttpPacketCount > 200000)
+	if (g_nMaxHttpPacketCount < 100 || g_nMaxHttpPacketCount > 200000)
 		g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
 	
 	g_nHttpTimeout = atoi(szHttpTimeout);
@@ -1115,8 +1167,26 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 	}
 	else
 	{
-		if (PushHttpPack(buffer, iphead, tcphead) == -1)
+		if (PushHttpPack(buffer, iphead, tcphead) != -1)
+			g_nPushedPackCount++;
+		else
 			nRs = -1;
+
+		int nPackSize = len_queue(_packets);
+		if (nPackSize > g_nMaxUsedPackSize)
+		{
+			g_nMaxUsedPackSize = nPackSize;
+		}
+		
+		if (0 == _push_pack_last_time)
+		{
+			_push_pack_last_time = time(NULL);
+		}
+		else if (time(NULL) - _push_pack_last_time > LOG_INFO_INTERVAL)
+		{
+			LOGINFO("********* Current Pushed Pack Count = %llu , Max Used Pack Buffer Size = %d ! *********", g_nPushedPackCount, g_nMaxUsedPackSize);	
+			_push_pack_last_time = time(NULL);
+		}
 	}
 
 	pthread_mutex_unlock(&_host_ip_lock);
@@ -1307,7 +1377,7 @@ int GetHttpData(char **data)
 	} while (packet!=NULL);
 
 	g_nHttpLen += http_len;
-	LOGDEBUG("********* Current http data len = %llu Bytes! *********", g_nHttpLen);
+	LOGINFO("********* Current http data len = %llu Bytes! *********", g_nHttpLen);
 	
 	// malloc
 	unsigned data_len = http_len+35+10+26+26+5+1;

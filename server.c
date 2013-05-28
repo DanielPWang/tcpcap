@@ -298,7 +298,7 @@ int SetupTCPServer(int server_port)
 
 int ProcessReqGetIpList()
 {
-	LOGINFO0("Receive request info for getting ip list.");
+	LOGDEBUG0("Receive request info for getting ip list.");
 
 	int nSend = 0;
 	char sip[16] = {0};
@@ -377,7 +377,7 @@ int ProcessReqGetIpList()
 
 	pSendData[nMonHostsLen+nExcludeHostsLen+8] = '\0';
 	
-	LOGINFO0("Send response ip list info.");
+	LOGDEBUG0("Send response ip list info.");
 	nSend = SendData(_client_config_socket, MSG_TYPE_RES_IPLIST, pSendData, nMonHostsLen+nExcludeHostsLen+8);
 	if (nSend < 0) 
 	{
@@ -397,7 +397,7 @@ int ProcessReqSetIpList(const char *pRecvData)
 	if (NULL == pRecvData)
 		return 0;
 	
-	LOGINFO0("Receive request info for setting ip list.");
+	LOGDEBUG0("Receive request info for setting ip list.");
 
 	int nSend = 0;
 	int nMonHostsLen = 0, nExcludeHostsLen = 0;
@@ -427,7 +427,7 @@ int ProcessReqSetIpList(const char *pRecvData)
 			if (NULL == ipport) 
 				break;
 
-			LOGINFO("Set monitor host with client request: %s", ipport);
+			LOGDEBUG("Set monitor host with client request: %s", ipport);
 			if (str_ipp(ipport, &_monitor_hosts[n])) 
 				++n;
 		}
@@ -456,7 +456,7 @@ int ProcessReqSetIpList(const char *pRecvData)
 			if (NULL == ipport) 
 				break;
 
-			LOGINFO("Exclude host with client req %s", ipport);
+			LOGDEBUG("Exclude host with client req %s", ipport);
 			if (str_ipp(ipport, &_exclude_hosts[n])) 
 				++n;
 		}
@@ -523,7 +523,7 @@ int ProcessReqSetIpList(const char *pRecvData)
 		fclose(pFile);
 	}
 	
-	LOGINFO0("Send response OK for setting ip list request.");
+	LOGDEBUG0("Send response OK for setting ip list request.");
 	nSend = SendData(_client_config_socket, MSG_TYPE_RES_OK, NULL, 0);
 	if (nSend < 0) 
 	{
@@ -758,7 +758,7 @@ while_start:
 				{
 					g_nFlagGetData = 1;
 					g_nFlagSendData = 0;
-					LOGINFO("send http_info[%d] %s", datalen, data);
+					LOGDEBUG("send http_info[%d] %s", datalen, data);
 					nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
 					free((void*)data);
 					g_nFlagSendData = 1;
@@ -776,7 +776,7 @@ while_start:
 				if ((_flow_socket_start_time != 0) && (time(NULL) - _flow_socket_start_time > FLOW_SEND_INTERVAL_TIME))
 				{
 					int nServerCount = GetServerCount();
-					LOGINFO("Ready to send flow info, Server flow count = %d", nServerCount);
+					LOGDEBUG("Ready to send flow info, Server flow count = %d", nServerCount);
 					if (nServerCount > 0)
 					{
 						time_t tmNow = time(NULL);
@@ -784,7 +784,7 @@ while_start:
 						{
 							if ((datalen = GetFlowData(i, tmNow, &data)) > 0)
 							{
-								LOGINFO("Send flow data of _flow_session[%d]", i);
+								LOGDEBUG("Send flow data of _flow_session[%d]", i);
 								nSend = SendData(_client_socket, MSG_TYPE_RES_FLOW_DATA, data, datalen);
 								free((void*)data);
 								if (nSend < 0) 

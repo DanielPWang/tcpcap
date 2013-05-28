@@ -186,6 +186,7 @@ int main(int argc, char* argv[])
 		} 
 		while (Living);
 	}
+	ShowLastLogInfo();
 	LOGINFO0("ready to exit...");
 	StopServer();
 	LOGINFO0("exit server...");

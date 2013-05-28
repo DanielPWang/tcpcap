@@ -3,7 +3,7 @@
 
 #define VER_MAJOR 1
 #define VER_MINOR 0
-#define VER_PATCH 8
+#define VER_PATCH 9
 
 #define MONITOR_COUNT 5
 
@@ -33,6 +33,9 @@ extern const char* CONFIG_PATH;
 #define MAX_FLOW_COLLECT_CLIENT   1000
 #define MAX_FLOW_RESPONSE_CLIENT  500
 #define FLOW_SEND_INTERVAL_TIME   60
+
+#define LOG_INFO_INTERVAL   3
+
 
 // server
 #define SERVER_PORT 2012
