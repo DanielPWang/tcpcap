@@ -51,6 +51,10 @@ static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
 static uint64_t g_nHttpLen = 0;
 static uint64_t g_nPushedPackCount = 0;
+uint64_t g_CapCount = 0;
+uint64_t g_CapSize = 0;
+uint32_t g_nFisrtTime = 0;
+uint32_t g_nLastTime = 0;
 static int g_nSessionCount = 0;
 static int g_nMaxUsedPackSize = 0;
 static int g_nMaxUsedSessionSize = 0;
@@ -126,27 +130,63 @@ void ShowLastLogInfo()
 	int nCurSessionUsedCount = g_nMaxHttpSessionCount - len_queue(_idl_session);
 
 	LOGINFO("\n \
-	g_nDropCountForPacketFull = %d \n \
-	g_nDropCountForSessionFull = %d \n \
-	g_nDropCountForImage = %d \n \
-	g_nTimeOutCount = %d \n \
-	g_nReusedCount = %d \n \
-	g_nPushedPackCount = %llu \n \
-	g_nSessionCount = %d \n \
-	g_nMaxUsedPackSize = %d \n \
-	g_nMaxUsedSessionSize = %d \n \
-	nCurSessionUsedCount = %d \n \
-	g_nHttpLen = %llu \n", g_nDropCountForPacketFull, 
-	g_nDropCountForSessionFull, 
-	g_nDropCountForImage,
-	g_nTimeOutCount,
-	g_nReusedCount,
-	g_nPushedPackCount,
-	g_nSessionCount,
-	g_nMaxUsedPackSize,
-	g_nMaxUsedSessionSize,
-	nCurSessionUsedCount,
-	g_nHttpLen);
+		g_nDropCountForPacketFull = %d \n \
+		g_nDropCountForSessionFull = %d \n \
+		g_nDropCountForImage = %d \n \
+		g_nTimeOutCount = %d \n \
+		g_nReusedCount = %d \n \
+		g_nPushedPackCount = %llu \n \
+		g_nSessionCount = %d \n \
+		g_nMaxUsedPackSize = %d \n \
+		g_nMaxUsedSessionSize = %d \n \
+		nCurSessionUsedCount = %d \n \
+		g_nHttpLen = %llu \n \
+		total capture %llu packets\n \
+		total capture %llu byte packets \n \
+		total capture time is %u seconds \n", g_nDropCountForPacketFull, 
+		g_nDropCountForSessionFull, 
+		g_nDropCountForImage,
+		g_nTimeOutCount,
+		g_nReusedCount,
+		g_nPushedPackCount,
+		g_nSessionCount,
+		g_nMaxUsedPackSize,
+		g_nMaxUsedSessionSize,
+		nCurSessionUsedCount,
+		g_nHttpLen,
+		g_CapCount,
+		g_CapSize,
+		g_nLastTime - g_nFisrtTime);
+
+	
+	printf("\n \
+		g_nDropCountForPacketFull = %d \n \
+		g_nDropCountForSessionFull = %d \n \
+		g_nDropCountForImage = %d \n \
+		g_nTimeOutCount = %d \n \
+		g_nReusedCount = %d \n \
+		g_nPushedPackCount = %llu \n \
+		g_nSessionCount = %d \n \
+		g_nMaxUsedPackSize = %d \n \
+		g_nMaxUsedSessionSize = %d \n \
+		nCurSessionUsedCount = %d \n \
+		g_nHttpLen = %llu \n \
+		total capture %llu packets\n \
+		total capture %llu byte packets \n \
+		total capture time is %u seconds \n", g_nDropCountForPacketFull,
+		g_nDropCountForSessionFull, 
+		g_nDropCountForImage,
+		g_nTimeOutCount,
+		g_nReusedCount,
+		g_nPushedPackCount,
+		g_nSessionCount,
+		g_nMaxUsedPackSize,
+		g_nMaxUsedSessionSize,
+		nCurSessionUsedCount,
+		g_nHttpLen,
+		g_CapCount,
+		g_CapSize,
+		g_nLastTime - g_nFisrtTime);
 }
 
 struct tcp_session* GetHttpSession(const struct iphdr* iphead, const struct tcphdr* tcphead)

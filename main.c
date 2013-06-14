@@ -28,6 +28,12 @@ size_t MemorySize;
 volatile int Living = 1;
 volatile int NeedReloadConfig = 0;
 
+extern uint64_t g_CapCount;
+extern uint64_t g_CapSize;
+extern uint32_t g_nFisrtTime;
+extern uint32_t g_nLastTime;
+
+
 const char *MonitorFilter;
 const char* CONFIG_PATH;
 
@@ -147,6 +153,15 @@ int main(int argc, char* argv[])
 			if (nrecv == 0) 
 				continue;
 
+			++g_CapCount;
+			g_CapSize += nrecv;
+			
+			if (0 == g_nFisrtTime)
+				g_nFisrtTime = time(NULL);
+			else
+				g_nLastTime = time(NULL);
+			
+					
 			struct ether_header *ehead = (struct ether_header*)buffer;
 			u_short eth_type = ntohs(ehead->ether_type);
 			if (ETHERTYPE_VLAN == eth_type)
