@@ -72,7 +72,7 @@ int exist_file(const char* path)
 /////////// LOG
 static char *_logfile = NULL;
 static FILE *_logfd = NULL;
-static size_t LOG_LENGTH_MAX = 64 * 1024 * 1024;
+static size_t LOG_LENGTH_MAX = 128 * 1024 * 1024;
 static pthread_mutex_t _loglock = PTHREAD_MUTEX_INITIALIZER;
 static int _level = 0;
 
@@ -130,15 +130,45 @@ int logmsg(int level, const char* fmt, ... )
 	va_end(ap);
 
 	if (_logfd!=stderr && ftell(_logfd)>=LOG_LENGTH_MAX) {
-		char* filename = (char*)calloc(1,strlen(_logfile) + 3);
-		if (filename != NULL) {
-			sprintf(filename, "%s.1", _logfile);
-			if (exist_file(filename)) unlink(filename);
+		char* filename1 = (char*)calloc(1,strlen(_logfile) + 3);
+		char* filename2 = (char*)calloc(1,strlen(_logfile) + 3);
+		char* filename3 = (char*)calloc(1,strlen(_logfile) + 3);
+		if (filename1 != NULL && filename2 != NULL && filename3 != NULL) {
+			sprintf(filename1, "%s.1", _logfile);
+			sprintf(filename2, "%s.2", _logfile);
+			sprintf(filename3, "%s.3", _logfile);
 			fclose(_logfd);
-			rename(_logfile, filename);
+			if (exist_file(filename1))
+			{
+				if (exist_file(filename2))
+				{
+					if (exist_file(filename3))
+					{
+						unlink(filename1);
+						rename(filename2, filename1);
+						rename(filename3, filename2);
+						rename(_logfile, filename3);
+					}
+					else
+					{
+						rename(_logfile, filename3);
+					}
+				}
+				else
+				{
+					rename(_logfile, filename2);
+				}
+			}
+			else
+			{
+				rename(_logfile, filename1);
+			}
 			_logfd = fopen(_logfile, "a");
-			if (_logfd == NULL) _logfd = stderr;
-			free(filename);
+			if (_logfd == NULL) 
+				_logfd = stderr;
+			free(filename1);
+			free(filename2);
+			free(filename3);
 		}
 	}
 	if (_logfd==stderr && _logfile!=NULL) {

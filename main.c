@@ -30,8 +30,8 @@ volatile int NeedReloadConfig = 0;
 
 extern uint64_t g_CapCount;
 extern uint64_t g_CapSize;
-extern uint32_t g_nFisrtTime;
-extern uint32_t g_nLastTime;
+extern uint32_t g_nCapFisrtTime;
+extern uint32_t g_nCapLastTime;
 
 
 const char *MonitorFilter;
@@ -156,10 +156,10 @@ int main(int argc, char* argv[])
 			++g_CapCount;
 			g_CapSize += nrecv;
 			
-			if (0 == g_nFisrtTime)
-				g_nFisrtTime = time(NULL);
+			if (0 == g_nCapFisrtTime)
+				g_nCapFisrtTime = time(NULL);
 			else
-				g_nLastTime = time(NULL);
+				g_nCapLastTime = time(NULL);
 			
 					
 			struct ether_header *ehead = (struct ether_header*)buffer;

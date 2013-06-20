@@ -51,14 +51,20 @@ static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
 static uint64_t g_nHttpLen = 0;
 static uint64_t g_nPushedPackCount = 0;
+static uint64_t g_nSkippedPackCount = 0;
+static uint32_t g_nSessionFisrtTime = 0;
+static uint32_t g_nSessionLastTime = 0;
+
 uint64_t g_CapCount = 0;
 uint64_t g_CapSize = 0;
-uint32_t g_nFisrtTime = 0;
-uint32_t g_nLastTime = 0;
+uint32_t g_nCapFisrtTime = 0;
+uint32_t g_nCapLastTime = 0;
 static int g_nSessionCount = 0;
 static int g_nMaxUsedPackSize = 0;
 static int g_nMaxUsedSessionSize = 0;
-
+static int g_bIsCapRes = 0;
+uint32_t g_nGetDataCostTime = 0;
+uint32_t g_nSendDataCostTime = 0;
 
 static int g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 static int g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
@@ -143,7 +149,11 @@ void ShowLastLogInfo()
 		g_nHttpLen = %llu \n \
 		total capture %llu packets\n \
 		total capture %llu byte packets \n \
-		total capture time is %u seconds \n", g_nDropCountForPacketFull, 
+		%llu packets is skipped \n \
+		total capture time is %u seconds \n \
+		total processing session time is %u seconds \n \
+		total cost time of getting data is %u msecs \n \
+		total cost time of sending data is %u msecs \n", g_nDropCountForPacketFull, 
 		g_nDropCountForSessionFull, 
 		g_nDropCountForImage,
 		g_nTimeOutCount,
@@ -156,7 +166,11 @@ void ShowLastLogInfo()
 		g_nHttpLen,
 		g_CapCount,
 		g_CapSize,
-		g_nLastTime - g_nFisrtTime);
+		g_nSkippedPackCount,
+		g_nCapLastTime - g_nCapFisrtTime,
+		g_nSessionLastTime - g_nSessionFisrtTime,
+		g_nGetDataCostTime/1000,
+		g_nSendDataCostTime/1000);
 
 	
 	printf("\n \
@@ -173,7 +187,11 @@ void ShowLastLogInfo()
 		g_nHttpLen = %llu \n \
 		total capture %llu packets\n \
 		total capture %llu byte packets \n \
-		total capture time is %u seconds \n", g_nDropCountForPacketFull,
+		%llu packets is skipped \n \
+		total capture time is %u seconds \n \
+		total processing session time is %u seconds \n \
+		total cost time of getting data is %u msecs \n \
+		total cost time of sending data is %u msecs \n", g_nDropCountForPacketFull, 
 		g_nDropCountForSessionFull, 
 		g_nDropCountForImage,
 		g_nTimeOutCount,
@@ -186,7 +204,11 @@ void ShowLastLogInfo()
 		g_nHttpLen,
 		g_CapCount,
 		g_CapSize,
-		g_nLastTime - g_nFisrtTime);
+		g_nSkippedPackCount,
+		g_nCapLastTime - g_nCapFisrtTime,
+		g_nSessionLastTime - g_nSessionFisrtTime,
+		g_nGetDataCostTime/1000,
+		g_nSendDataCostTime/1000);
 }
 
 struct tcp_session* GetHttpSession(const struct iphdr* iphead, const struct tcphdr* tcphead)
@@ -280,19 +302,22 @@ int NewHttpSession(const char* packet)
 	const char* cmdline = content;
 	LOGTRACE0(cmdline);
 	*enter = tmp;
-	
-	if ((strstr(cmdline, ".gif ") != NULL)
-		|| (strstr(cmdline, ".js ") != NULL)
-		|| (strstr(cmdline, ".js?") != NULL)
-		|| (strstr(cmdline, ".css ") != NULL)
-		|| (strstr(cmdline, ".jpg ") != NULL)
-		|| (strstr(cmdline, ".ico ") != NULL)
-		|| (strstr(cmdline, ".bmp ") != NULL)
-		|| (strstr(cmdline, ".png ") != NULL))
-		//|| (strstr(cmdline, ".tif ") != NULL)
-		//|| (strstr(cmdline, ".tiff ") != NULL))
+
+	if (!g_bIsCapRes)
 	{
-		return -3;
+		if ((strstr(cmdline, ".gif ") != NULL)
+			|| (strstr(cmdline, ".js ") != NULL)
+			|| (strstr(cmdline, ".js?") != NULL)
+			|| (strstr(cmdline, ".css ") != NULL)
+			|| (strstr(cmdline, ".jpg ") != NULL)
+			|| (strstr(cmdline, ".ico ") != NULL)
+			|| (strstr(cmdline, ".bmp ") != NULL)
+			|| (strstr(cmdline, ".png ") != NULL))
+			//|| (strstr(cmdline, ".tif ") != NULL)
+			//|| (strstr(cmdline, ".tiff ") != NULL))
+		{
+			return -3;
+		}
 	}
 	
 	// find IDL session
@@ -1002,6 +1027,11 @@ void *HTTP_Thread(void* param)
 			continue;
 		}
 
+		if (0 == g_nSessionFisrtTime)
+			g_nSessionFisrtTime = time(NULL);
+		else
+			g_nSessionLastTime = time(NULL);
+		
 		struct timeval *tv = (struct timeval*)packet;
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
@@ -1013,7 +1043,6 @@ void *HTTP_Thread(void* param)
 			continue; 
 		} 
 
-		// TMP
 		tcphead->seq = ntohl(tcphead->seq);
 		tcphead->ack_seq = ntohl(tcphead->ack_seq);
 
@@ -1040,8 +1069,7 @@ void *HTTP_Thread(void* param)
 						LOGWARN("_http_session is full. drop count = %d, drop content = %s", ++g_nDropCountForSessionFull, content);
 						*enter = '\r';
 
-						LOGDEBUG("g_nFlagGetData = %d", g_nFlagGetData);
-						LOGDEBUG("g_nFlagSendData = %d", g_nFlagSendData);
+						LOGWARN("Current Send status: g_nFlagGetData = %d, g_nFlagSendData = %d", g_nFlagGetData, g_nFlagSendData);
 					}
 				}
 				free((void*)packet);
@@ -1056,6 +1084,8 @@ void *HTTP_Thread(void* param)
 			LOGDEBUG0("cannt find request with reponse.");
 			free((void*)packet);
 		}
+
+		g_nSessionLastTime = time(NULL);
 	}
 	return NULL;
 }
@@ -1075,6 +1105,11 @@ int HttpInit()
 	GetValue(CONFIG_PATH, "max_session_count", szMaxSessionCount, 7);
 	GetValue(CONFIG_PATH, "max_packet_count", szMaxPacketCount, 7);
 	GetValue(CONFIG_PATH, "http_timeout", szHttpTimeout, 4);
+
+	char szCapRes[10] = {0};
+	GetValue(CONFIG_PATH, "cap_res", szCapRes, 6);
+	if (strcmp(szCapRes, "true") == 0)
+		g_bIsCapRes = 1;
 	
 	g_nMaxHttpSessionCount = atoi(szMaxSessionCount);
 	if (g_nMaxHttpSessionCount < 50 || g_nMaxHttpSessionCount > 100000)
@@ -1201,7 +1236,8 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 		sip.s_addr = iphead->saddr;
 		dip.s_addr = iphead->daddr;
 		char ssip[16], sdip[16];
-		LOGTRACE("%s => %s is skiped.", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
+		LOGTRACE("%s => %s is skipped.", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
+		g_nSkippedPackCount++;
 
 		nRs = -1; 
 	}

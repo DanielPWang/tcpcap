@@ -51,6 +51,9 @@ static int ProcessReqSetIpList(const char *pRecvData);
 volatile int g_nFlagGetData = 0;
 volatile int g_nFlagSendData = 0;
 
+extern uint32_t g_nGetDataCostTime;
+extern uint32_t g_nSendDataCostTime;
+
 int InitServer()
 {
 	return 1;
@@ -557,7 +560,7 @@ thread_start:
 	int nerr = 0;
 	fd_set rfds;
 	fd_set wfds;
-	struct timeval	tv;
+	struct timeval tv;
 	int retval = 0;
 	int max_socket = 0;
 	time_t active = time(NULL);
@@ -754,12 +757,23 @@ while_start:
 				size_t datalen = 0;
 				int nSend = 0;
 				g_nFlagGetData = 0;
+
+				struct timeval tvBeforGet;
+				gettimeofday(&tvBeforGet, NULL);
 				if ((datalen = GetHttpData(&data)) > 0) 
 				{
+					struct timeval tvAfterGet;
+					gettimeofday(&tvAfterGet, NULL);
+					g_nGetDataCostTime += (tvAfterGet.tv_sec-tvBeforGet.tv_sec)*1000000+(tvAfterGet.tv_usec-tvBeforGet.tv_usec);
 					g_nFlagGetData = 1;
 					g_nFlagSendData = 0;
 					LOGDEBUG("send http_info[%d] %s", datalen, data);
+					struct timeval tvBeforSend;
+					gettimeofday(&tvBeforSend, NULL);
 					nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
+					struct timeval tvAfterSend;
+					gettimeofday(&tvAfterSend, NULL);
+					g_nSendDataCostTime += (tvAfterSend.tv_sec-tvBeforSend.tv_sec)*1000000+(tvAfterSend.tv_usec-tvBeforSend.tv_usec);
 					free((void*)data);
 					g_nFlagSendData = 1;
 					if (nSend < 0) 
