@@ -46,6 +46,12 @@ static int g_nDropCountForSessionFull = 0;
 static int g_nDropCountForImage = 0;
 static int g_nTimeOutCount = 0;
 static int g_nReusedCount = 0;
+static int g_nLaterPackIsMaxCount = 0;
+static int g_nContentErrorCount = 0;
+static int g_nContentUnknownCount = 0;
+static int g_nHttpNullCount = 0;
+static int g_nDatalenErrorCount = 0;
+static int g_nHttpcodeErrorCount = 0;
 static int g_nChunked = 0;
 static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
@@ -141,6 +147,8 @@ void ShowLastLogInfo()
 		g_nDropCountForImage = %d \n \
 		g_nTimeOutCount = %d \n \
 		g_nReusedCount = %d \n \
+		g_nLaterPackIsMaxCount = %d \n \
+		g_nContentErrorCount = %d (g_nContentUnknownCount=%d g_nHttpNullCount=%d g_nDatalenErrorCount=%d g_nHttpcodeErrorCount=%d) \n \
 		g_nPushedPackCount = %llu \n \
 		g_nSessionCount = %d \n \
 		g_nMaxUsedPackSize = %d \n \
@@ -158,6 +166,8 @@ void ShowLastLogInfo()
 		g_nDropCountForImage,
 		g_nTimeOutCount,
 		g_nReusedCount,
+		g_nLaterPackIsMaxCount,
+		g_nContentErrorCount, g_nContentUnknownCount, g_nHttpNullCount, g_nDatalenErrorCount, g_nHttpcodeErrorCount,
 		g_nPushedPackCount,
 		g_nSessionCount,
 		g_nMaxUsedPackSize,
@@ -179,6 +189,8 @@ void ShowLastLogInfo()
 		g_nDropCountForImage = %d \n \
 		g_nTimeOutCount = %d \n \
 		g_nReusedCount = %d \n \
+		g_nLaterPackIsMaxCount = %d \n \
+		g_nContentErrorCount = %d (g_nContentUnknownCount=%d g_nHttpNullCount=%d g_nDatalenErrorCount=%d g_nHttpcodeErrorCount=%d) \n \
 		g_nPushedPackCount = %llu \n \
 		g_nSessionCount = %d \n \
 		g_nMaxUsedPackSize = %d \n \
@@ -196,6 +208,8 @@ void ShowLastLogInfo()
 		g_nDropCountForImage,
 		g_nTimeOutCount,
 		g_nReusedCount,
+		g_nLaterPackIsMaxCount,
+		g_nContentErrorCount, g_nContentUnknownCount, g_nHttpNullCount, g_nDatalenErrorCount, g_nHttpcodeErrorCount,
 		g_nPushedPackCount,
 		g_nSessionCount,
 		g_nMaxUsedPackSize,
@@ -289,7 +303,6 @@ int NewHttpSession(const char* packet)
 			LOGERROR0("The end of first pack head line is N!");
 			break;
 		}
-		
 	}
 	
 	if (NULL == enter)
@@ -305,16 +318,20 @@ int NewHttpSession(const char* packet)
 
 	if (!g_bIsCapRes)
 	{
-		if ((strstr(cmdline, ".gif ") != NULL)
-			|| (strstr(cmdline, ".js ") != NULL)
-			|| (strstr(cmdline, ".js?") != NULL)
-			|| (strstr(cmdline, ".css ") != NULL)
-			|| (strstr(cmdline, ".jpg ") != NULL)
-			|| (strstr(cmdline, ".ico ") != NULL)
-			|| (strstr(cmdline, ".bmp ") != NULL)
-			|| (strstr(cmdline, ".png ") != NULL))
-			//|| (strstr(cmdline, ".tif ") != NULL)
-			//|| (strstr(cmdline, ".tiff ") != NULL))
+		char* pTmpContent[RECV_BUFFER_LEN] = {0};
+		memcpy(pTmpContent, content, contentlen);
+		pTmpContent[contentlen] = '\0';
+		strlwr(pTmpContent);
+		if ((strstr(pTmpContent, ".gif ") != NULL)
+			|| (strstr(pTmpContent, ".js ") != NULL)
+			|| (strstr(pTmpContent, ".js?") != NULL)
+			|| (strstr(pTmpContent, ".css ") != NULL)
+			|| (strstr(pTmpContent, ".jpg ") != NULL)
+			|| (strstr(pTmpContent, ".ico ") != NULL)
+			|| (strstr(pTmpContent, ".bmp ") != NULL)
+			|| (strstr(pTmpContent, ".png ") != NULL))
+			//|| (strstr(pTmpContent, ".tif ") != NULL)
+			//|| (strstr(pTmpContent, ".tiff ") != NULL))
 		{
 			return -3;
 		}
@@ -471,8 +488,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				else
 				{
 					CleanHttpSession(pSession);
-					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u, g_nLaterPackIsMaxCount = %d", 
+							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, ++g_nLaterPackIsMaxCount);
 
 					return HTTP_APPEND_DROP_PACKET;
 				}
@@ -687,6 +704,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				}
 				else
 				{
+					/*
 					char *pszCode = memmem(content, contentlen, "http/1.1 200", 12);
 					if (pszCode == NULL)
 						pszCode = memmem(content, contentlen, "http/1.0 200", 12);
@@ -702,6 +720,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 						LOGDEBUG("Session[%d]with transfer none, g_nNone=%d content= %s", nIndex, ++g_nNone, content);
 						pSession->transfer_flag = HTTP_TRANSFER_NONE;
 					}
+					*/
+
+					LOGDEBUG("Session[%d]with html end, g_nHtmlEnd=%d content= %s", nIndex, ++g_nHtmlEnd, content);
+					pSession->transfer_flag = HTTP_TRANSFER_WITH_HTML_END;
 				}
 			}
 		}
@@ -725,24 +747,29 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 
 		if (HTTP_TRANSFER_NONE == pSession->transfer_flag)
 		{
-			LOGDEBUG("Session[%d] content is others and not HTTP_TRANSFER_WITH_HTML_END.", nIndex);
+			//LOGDEBUG("Session[%d] content is others and not HTTP_TRANSFER_WITH_HTML_END.", nIndex);
+			LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", nIndex, ++g_nContentErrorCount, ++g_nContentUnknownCount);
+			
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
+
+			if (HTTP_CONTENT_NONE == pSession->content_type)
+			{
+				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE and HTTP_CONTENT_NONE; content is %s\n%s", nIndex, pSession->request_head, content);
+				//CleanHttpSession(pSession);
+			}
+			else
+			{
+				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE but not HTTP_CONTENT_NONE; content is %s\n%s", nIndex, pSession->request_head, content);
+				//if (push_queue(_whole_content, pSession) < 0)
+				//	LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+
+				//CleanHttpSession(pSession);
+			}
 			
-			pSession->flag = HTTP_SESSION_FINISH;
-			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-			
+			CleanHttpSession(pSession);
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
-
-		/*
-		if (pSession->response_head != NULL)
-		{
-			free(pSession->response_head);
-			pSession->response_head = NULL;
-		}
-		*/
 	}
 
 	if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == pSession->transfer_flag)
@@ -1549,23 +1576,23 @@ int GetHttpData(char **data)
 	{
 		LOGERROR("No GET or POST. %c%c%c%c", HTTP[0],HTTP[1],HTTP[2],HTTP[3]);
 	}
-	
+
 	if (HTTP == NULL) {
-		LOGERROR0("Not http!!!!! cannt get here!!!.");
+		LOGWARN("Not http!!!!! cannt get here!!!. g_nContentErrorCount = %d, g_nHttpNullCount = %d", ++g_nContentErrorCount, ++g_nHttpNullCount);
 		CleanHttpSession(pSession);
 		free(http_content);
 		return 0;
 	}
 
 	if ((HTTP - http_content) >= data_len) {
-		LOGWARN("Session[%d] Address more than data length. Current content= %s", pSession->index, HTTP_PRE);
+		LOGWARN("Session[%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->index, HTTP_PRE, ++g_nContentErrorCount, ++g_nDatalenErrorCount);
 		CleanHttpSession(pSession);
 		free(http_content);
 		return 0;
 	}
 	
 	LOGDEBUG("Session[%d] ready to get data", pSession->index);
-	if ((pSession->content_type != HTTP_CONTENT_NONE)
+	if (((pSession->content_type != HTTP_CONTENT_NONE) && (transfer_flag != HTTP_TRANSFER_NONE))
 		|| (HTTP_TRANSFER_WITH_HTML_END == transfer_flag))
 	{
 		// get http code
@@ -1575,7 +1602,7 @@ int GetHttpData(char **data)
 		
 		if (NULL == http_code)
 		{
-			LOGWARN("Session[%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s", pSession->index, HTTP_PRE);
+			LOGWARN("Session[%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->index, HTTP_PRE, ++g_nContentErrorCount, ++g_nHttpcodeErrorCount);
 			CleanHttpSession(pSession);
 			free(http_content);
 			return 0;
@@ -1802,10 +1829,13 @@ NOZIP:
 		
 		return data_len;
 	}
-	else
+	/* else
 	{
-		LOGDEBUG("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
+		//LOGDEBUG("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
+		LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->index, ++g_nContentErrorCount, ++g_nContentUnknownCount);
+		LOGINFO("Session[%d] content is %s", pSession->index, HTTP_PRE);
 	}
+	*/
 	
 	CleanHttpSession(pSession);
 	free(http_content);
