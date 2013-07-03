@@ -107,6 +107,7 @@ enum HTTP_TRANSFER_FLAGS {
 enum HTTP_CONTENT_TYPE { 
 	HTTP_CONTENT_NONE,
 	HTTP_CONTENT_HTML,
+	HTTP_CONTENT_RES,
 	HTTP_CONTENT_FILE_PDF,
 	HTTP_CONTENT_FILE_KDH,
 	HTTP_CONTENT_FILE_CEB,
@@ -316,12 +317,14 @@ int NewHttpSession(const char* packet)
 	LOGTRACE0(cmdline);
 	*enter = tmp;
 
+	unsigned init_content_type = HTTP_CONTENT_NONE;
+	char* pTmpContent[RECV_BUFFER_LEN] = {0};
+	memcpy(pTmpContent, content, contentlen);
+	pTmpContent[contentlen] = '\0';
+	strlwr(pTmpContent);
+	
 	if (!g_bIsCapRes)
 	{
-		char* pTmpContent[RECV_BUFFER_LEN] = {0};
-		memcpy(pTmpContent, content, contentlen);
-		pTmpContent[contentlen] = '\0';
-		strlwr(pTmpContent);
 		if ((strstr(pTmpContent, ".gif ") != NULL)
 			|| (strstr(pTmpContent, ".js ") != NULL)
 			|| (strstr(pTmpContent, ".js?") != NULL)
@@ -334,6 +337,22 @@ int NewHttpSession(const char* packet)
 			//|| (strstr(pTmpContent, ".tiff ") != NULL))
 		{
 			return -3;
+		}
+	}
+	else
+	{
+		if ((strstr(pTmpContent, ".gif ") != NULL)
+			|| (strstr(pTmpContent, ".js ") != NULL)
+			|| (strstr(pTmpContent, ".js?") != NULL)
+			|| (strstr(pTmpContent, ".css ") != NULL)
+			|| (strstr(pTmpContent, ".jpg ") != NULL)
+			|| (strstr(pTmpContent, ".ico ") != NULL)
+			|| (strstr(pTmpContent, ".bmp ") != NULL)
+			|| (strstr(pTmpContent, ".png ") != NULL))
+			//|| (strstr(pTmpContent, ".tif ") != NULL)
+			//|| (strstr(pTmpContent, ".tiff ") != NULL))
+		{
+			init_content_type = HTTP_CONTENT_RES;
 		}
 	}
 	
@@ -392,7 +411,7 @@ int NewHttpSession(const char* packet)
 	pIDL->transfer_flag = HTTP_TRANSFER_INIT;
 	pIDL->response_head_recv_flag = 0;
 	pIDL->content_encoding_gzip = 0;
-	pIDL->content_type = HTTP_CONTENT_NONE;
+	pIDL->content_type = init_content_type;
 	pIDL->response_head = NULL;
 	pIDL->response_head_gen_time = 0;
 	pIDL->response_head_len = 0;
@@ -597,7 +616,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			pSession->content_encoding_gzip = 1;
 
 		char* content_type = memmem(content, contentlen, "content-type: ", 14);
-		if (content_type != NULL)
+		if ((content_type != NULL) && (HTTP_CONTENT_NONE == pSession->content_type))
 		{
 			if (strncmp(content_type+14, "text/html", 9) == 0 
 				|| strncmp(content_type+14, "text/xml", 8) == 0 
@@ -654,7 +673,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
 			}
 		}
-		else
+		else if (pSession->content_type != HTTP_CONTENT_RES)
 		{
 			char *tmp = NULL;
 			char *pszContentLen = memmem(content, contentlen, "content-length:", 15);
@@ -679,7 +698,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			}
 		}
 		
-		if (HTTP_CONTENT_HTML == pSession->content_type)
+		if ((HTTP_CONTENT_HTML == pSession->content_type) || (HTTP_CONTENT_RES == pSession->content_type))
 		{
 			char *tmp = NULL;
 			char *pszContentLen = memmem(content, contentlen, "content-length:", 15);
@@ -704,7 +723,6 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				}
 				else
 				{
-					/*
 					char *pszCode = memmem(content, contentlen, "http/1.1 200", 12);
 					if (pszCode == NULL)
 						pszCode = memmem(content, contentlen, "http/1.0 200", 12);
@@ -720,10 +738,6 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 						LOGDEBUG("Session[%d]with transfer none, g_nNone=%d content= %s", nIndex, ++g_nNone, content);
 						pSession->transfer_flag = HTTP_TRANSFER_NONE;
 					}
-					*/
-
-					LOGDEBUG("Session[%d]with html end, g_nHtmlEnd=%d content= %s", nIndex, ++g_nHtmlEnd, content);
-					pSession->transfer_flag = HTTP_TRANSFER_WITH_HTML_END;
 				}
 			}
 		}
@@ -747,27 +761,24 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 
 		if (HTTP_TRANSFER_NONE == pSession->transfer_flag)
 		{
-			//LOGDEBUG("Session[%d] content is others and not HTTP_TRANSFER_WITH_HTML_END.", nIndex);
-			LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", nIndex, ++g_nContentErrorCount, ++g_nContentUnknownCount);
-			
-			if (!bIsCurPack)
-				return HTTP_APPEND_FINISH_LATER;
+			LOGDEBUG("Session[%d] content is others and not HTTP_TRANSFER_WITH_HTML_END.", nIndex);
 
 			if (HTTP_CONTENT_NONE == pSession->content_type)
 			{
 				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE and HTTP_CONTENT_NONE; content is %s\n%s", nIndex, pSession->request_head, content);
-				//CleanHttpSession(pSession);
 			}
 			else
 			{
 				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE but not HTTP_CONTENT_NONE; content is %s\n%s", nIndex, pSession->request_head, content);
-				//if (push_queue(_whole_content, pSession) < 0)
-				//	LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-
-				//CleanHttpSession(pSession);
 			}
 			
-			CleanHttpSession(pSession);
+			if (!bIsCurPack)
+				return HTTP_APPEND_FINISH_LATER;
+			
+			pSession->flag = HTTP_SESSION_FINISH;
+			if (push_queue(_whole_content, pSession) < 0)
+				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+			
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
 	}
@@ -1592,7 +1603,7 @@ int GetHttpData(char **data)
 	}
 	
 	LOGDEBUG("Session[%d] ready to get data", pSession->index);
-	if (((pSession->content_type != HTTP_CONTENT_NONE) && (transfer_flag != HTTP_TRANSFER_NONE))
+	if ((pSession->content_type != HTTP_CONTENT_NONE)
 		|| (HTTP_TRANSFER_WITH_HTML_END == transfer_flag))
 	{
 		// get http code
@@ -1829,14 +1840,13 @@ NOZIP:
 		
 		return data_len;
 	}
-	/* else
+	else
 	{
 		//LOGDEBUG("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
 		LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->index, ++g_nContentErrorCount, ++g_nContentUnknownCount);
 		LOGINFO("Session[%d] content is %s", pSession->index, HTTP_PRE);
 	}
-	*/
-	
+		
 	CleanHttpSession(pSession);
 	free(http_content);
 	return 0;
