@@ -8,6 +8,7 @@
 // int isHTTP(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int HttpInit();
 int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
+int IsConfigPort(struct hosts_t *pServer);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
 int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);

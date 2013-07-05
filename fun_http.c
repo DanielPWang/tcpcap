@@ -1308,6 +1308,30 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 	return nRs;
 }
 
+int IsConfigPort(struct hosts_t *pServer)
+{
+	if (NULL == _monitor_hosts)
+		return -1;
+	
+	for (int npos = 0; npos < _monitor_hosts_count; npos++)
+	{
+		struct hosts_t *tmp = &_monitor_hosts[npos];
+		if (0 == tmp->ip.s_addr)
+			continue;
+		
+		if (tmp->ip.s_addr == pServer->ip.s_addr)
+		{
+			if (tmp->port == pServer->port)
+				return 1;
+			else
+				return 0;
+		}
+	}
+
+	return 0;
+}
+
+
 // Load rule from config.
 int LoadHttpConf(const char* filename)
 {
@@ -1492,9 +1516,13 @@ int GetHttpData(char **data)
 
 	g_nHttpLen += http_len;
 	LOGINFO("********* Current http data len = %llu Bytes! *********", g_nHttpLen);
+
+	int nPortOffsite = 0;
+	int bIsConfigPort = IsConfigPort(&pSession->server);
+	if (bIsConfigPort)
+		nPortOffsite = 6;
 	
-	// malloc
-	unsigned data_len = http_len+35+10+26+26+5+1;
+	unsigned data_len = http_len+35+10+26+26+nPortOffsite+5+1;
 	char* http_content = (char*)calloc(1, data_len);
 	if (http_content == NULL) {
 		LOGERROR0("mallocing memory failed. will be retry");
@@ -1502,17 +1530,28 @@ int GetHttpData(char **data)
 	}
 	// make data
 	size_t pos = 0;
-	char sip[20];
+	char sip[20] = {0};
+	char sport[20] = {0};
 	struct tm _tm;
 	localtime_r(&pSession->create.tv_sec, &_tm);
 	sprintf(http_content, "VISIT_TIME=%04d-%02d-%02d %02d:%02d:%02d:%03d",
 			_tm.tm_year+1900, _tm.tm_mon+1, _tm.tm_mday,
 			_tm.tm_hour, _tm.tm_min, _tm.tm_sec, (int)(pSession->create.tv_usec/1000));
-	// sprintf(http_content+35, "STATE=200");
+
 	sprintf(http_content+35+10, "IP_CLIENT=%15s", inet_ntop(AF_INET, &pSession->client.ip, sip, 20));
-	sprintf(http_content+35+10+26, "IP_SERVER=%15s", inet_ntop(AF_INET, &pSession->server.ip, sip, 20));
-	sprintf(http_content+35+10+26+26, "DATA=");
-	pos = 35+10+26+26+5;
+
+	if (!nPortOffsite)
+	{
+		sprintf(http_content+35+10+26, "IP_SERVER=%15s", inet_ntop(AF_INET, &pSession->server.ip, sip, 20));
+	}
+	else
+	{
+		sprintf(sport, "%u", ntohs(pSession->server.port));
+		sprintf(http_content+35+10+26, "IP_SERVER=%15s:%-5s", inet_ntop(AF_INET, &pSession->server.ip, sip, 20), sport);
+	}
+	
+	sprintf(http_content+35+10+26+26+nPortOffsite, "DATA=");
+	pos = 35+10+26+26+nPortOffsite+5;
 	
 	packet = pSession->data;
 	do {
@@ -1534,27 +1573,8 @@ int GetHttpData(char **data)
 	http_content[pos] = '\0';
 	ASSERT(pos+1 == data_len);
 
-	/*
-	FILE* pf;
-	int nwrite, n;
-
-	// sent for debug
-	pf = fopen("sent.txt", "a+b");
-	nwrite = 0;
-	do {
-		n = fwrite(http_content+nwrite, 1, data_len-nwrite, pf);
-		if (n<1) {
-			perror("Error in writing sent.txt");
-			break;
-		}
-		nwrite += n;
-	} while (nwrite < data_len);
-	fprintf(pf, "\n===================[%d]==%d=========\n", data_len, nwrite);
-	fclose(pf); 
-	*/
-	
 	// proce http
-	char* HTTP = http_content+35+10+26+26+5;
+	char* HTTP = http_content+35+10+26+26+nPortOffsite+5;
 	char* HTTP_PRE = HTTP;
 	if (*(unsigned*)HTTP == _get_image) 
 	{
