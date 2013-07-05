@@ -63,7 +63,7 @@ int LoadConfig(const char* confPath)
 
 void ShowVersion()
 {
-	printf("Version %d.%d.%d (%d) Copyright(C)2012\n",
+	printf("Version %d.%d.%d (%d) Copyright(C)2013\n",
 			VER_MAJOR, VER_MINOR, VER_PATCH, VER_SVNID);
 }
 
