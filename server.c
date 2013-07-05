@@ -27,17 +27,16 @@ extern size_t _exclude_hosts_count;
 extern pthread_mutex_t _host_ip_lock;
 
 static int _srv_socket = -1;
-static volatile int _client_socket = -1;
+static int _client_socket = -1;
 static char _client_ip[16] = {0};
 
-static volatile int _client_config_socket = -1;
+static int _client_config_socket = -1;
 static char _client_config_ip[16] = {0};
 
 static time_t _flow_socket_start_time = 0;
 
 static volatile int _runing = 1;
-static pthread_t _srv_thread = 0;
-static pthread_t _send_data_thread = 0;
+static pthread_t _srv_thread;
 static struct msg_head _msg_heart_hit = {0};
 
 static int SetupTCPServer(int server_port);
@@ -751,6 +750,87 @@ while_start:
 						free(pRecvData);
 				}
 			}
+
+			if (_client_socket > 0)
+			{
+				char *data = NULL;
+				size_t datalen = 0;
+				int nSend = 0;
+				g_nFlagGetData = 0;
+
+				struct timeval tvBeforGet;
+				gettimeofday(&tvBeforGet, NULL);
+				if ((datalen = GetHttpData(&data)) > 0) 
+				{
+					struct timeval tvAfterGet;
+					gettimeofday(&tvAfterGet, NULL);
+					g_nGetDataCostTime += (tvAfterGet.tv_sec-tvBeforGet.tv_sec)*1000000+(tvAfterGet.tv_usec-tvBeforGet.tv_usec);
+					g_nFlagGetData = 1;
+					g_nFlagSendData = 0;
+					LOGDEBUG("send http_info[%d] %s", datalen, data);
+					struct timeval tvBeforSend;
+					gettimeofday(&tvBeforSend, NULL);
+					nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
+					struct timeval tvAfterSend;
+					gettimeofday(&tvAfterSend, NULL);
+					g_nSendDataCostTime += (tvAfterSend.tv_sec-tvBeforSend.tv_sec)*1000000+(tvAfterSend.tv_usec-tvBeforSend.tv_usec);
+					free((void*)data);
+					g_nFlagSendData = 1;
+					if (nSend < 0) 
+					{
+						LOGWARN0("remote client socket is error or close. recontinue.");
+						close(_client_socket);
+						_client_socket = -1;
+						goto while_start;
+					}
+					active = time(NULL);
+				}
+				g_nFlagGetData = 1;
+				
+				if ((_flow_socket_start_time != 0) && (time(NULL) - _flow_socket_start_time > FLOW_SEND_INTERVAL_TIME))
+				{
+					int nServerCount = GetServerCount();
+					LOGDEBUG("Ready to send flow info, Server flow count = %d", nServerCount);
+					if (nServerCount > 0)
+					{
+						time_t tmNow = time(NULL);
+						for (int i = 0; i < MAX_FLOW_SESSIONS; i++)
+						{
+							if ((datalen = GetFlowData(i, tmNow, &data)) > 0)
+							{
+								LOGDEBUG("Send flow data of _flow_session[%d]", i);
+								nSend = SendData(_client_socket, MSG_TYPE_RES_FLOW_DATA, data, datalen);
+								free((void*)data);
+								if (nSend < 0) 
+								{
+									LOGWARN0("remote client socket is error or close. recontinue.");
+									close(_client_socket);
+									_client_socket = -1;
+									goto while_start;
+								}	
+							}
+						}
+						
+						_flow_socket_start_time = time(NULL);
+					}
+					else
+					{
+						_flow_socket_start_time = 0;
+					}
+				}
+				
+				if (time(NULL) - active > 10) 
+				{
+					active = time(NULL);
+					nSend = SendData(_client_socket, MSG_TYPE_HEARTHIT, NULL, 0);
+					if (nSend < 0) {
+						LOGWARN0("remote client socket is error or close. recontinue.");
+						close(_client_socket);
+						_client_socket = -1;
+						goto while_start;
+					}
+				}
+			}
 		}
 	}
 
@@ -765,102 +845,6 @@ while_start:
 	return NULL;
 }
 
-void* send_data_thread(void* p)
-{
-	time_t active = time(NULL);
-	while (_runing) 
-	{
-while_start:
-	
-		if (_client_socket > 0)
-		{
-			char *data = NULL;
-			size_t datalen = 0;
-			int nSend = 0;
-			g_nFlagGetData = 0;
-
-			struct timeval tvBeforGet;
-			gettimeofday(&tvBeforGet, NULL);
-			if ((datalen = GetHttpData(&data)) > 0) 
-			{
-				struct timeval tvAfterGet;
-				gettimeofday(&tvAfterGet, NULL);
-				g_nGetDataCostTime += (tvAfterGet.tv_sec-tvBeforGet.tv_sec)*1000000+(tvAfterGet.tv_usec-tvBeforGet.tv_usec);
-				g_nFlagGetData = 1;
-				g_nFlagSendData = 0;
-				LOGDEBUG("send http_info[%d] %s", datalen, data);
-				struct timeval tvBeforSend;
-				gettimeofday(&tvBeforSend, NULL);
-				nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
-				struct timeval tvAfterSend;
-				gettimeofday(&tvAfterSend, NULL);
-				g_nSendDataCostTime += (tvAfterSend.tv_sec-tvBeforSend.tv_sec)*1000000+(tvAfterSend.tv_usec-tvBeforSend.tv_usec);
-				free((void*)data);
-				g_nFlagSendData = 1;
-				if (nSend < 0) 
-				{
-					LOGWARN0("remote client socket is error or close. recontinue.");
-					close(_client_socket);
-					_client_socket = -1;
-					goto while_start;
-				}
-				active = time(NULL);
-			}
-			g_nFlagGetData = 1;
-			
-			if ((_flow_socket_start_time != 0) && (time(NULL) - _flow_socket_start_time > FLOW_SEND_INTERVAL_TIME))
-			{
-				int nServerCount = GetServerCount();
-				LOGDEBUG("Ready to send flow info, Server flow count = %d", nServerCount);
-				if (nServerCount > 0)
-				{
-					time_t tmNow = time(NULL);
-					for (int i = 0; i < MAX_FLOW_SESSIONS; i++)
-					{
-						if ((datalen = GetFlowData(i, tmNow, &data)) > 0)
-						{
-							LOGDEBUG("Send flow data of _flow_session[%d]", i);
-							nSend = SendData(_client_socket, MSG_TYPE_RES_FLOW_DATA, data, datalen);
-							free((void*)data);
-							if (nSend < 0) 
-							{
-								LOGWARN0("remote client socket is error or close. recontinue.");
-								close(_client_socket);
-								_client_socket = -1;
-								goto while_start;
-							}	
-						}
-					}
-					
-					_flow_socket_start_time = time(NULL);
-				}
-				else
-				{
-					_flow_socket_start_time = 0;
-				}
-			}
-			
-			if (time(NULL) - active > 10) 
-			{
-				active = time(NULL);
-				nSend = SendData(_client_socket, MSG_TYPE_HEARTHIT, NULL, 0);
-				if (nSend < 0) {
-					LOGWARN0("remote client socket is error or close. recontinue.");
-					close(_client_socket);
-					_client_socket = -1;
-					goto while_start;
-				}
-			}
-		}
-		else
-		{
-			sleep(1);
-		}
-	}
-
-	return NULL;
-}
-
 int StartServer()
 {
 	_msg_heart_hit.version = MSG_NORMAL_VER;
@@ -868,18 +852,13 @@ int StartServer()
 	_msg_heart_hit.length = htonl(0);
 
 	int nerr = pthread_create(&_srv_thread, NULL, server_thread, NULL);
-	if (0 == nerr)
-		nerr = pthread_create(&_send_data_thread, NULL, send_data_thread, NULL);
-	
 	return nerr;
 }
 
 void StopServer()
 {
 	_runing = 0;
-	void* result_srv_thread;
-	void* result_send_data_thread;
-	pthread_join(_send_data_thread, &result_send_data_thread);
-	pthread_join(_srv_thread, &result_srv_thread);
+	void* result;
+	pthread_join(_srv_thread, &result);
 }
 
