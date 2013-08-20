@@ -15,7 +15,8 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);
 int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack);
 int AppendClientToServer(int nIndex, const char* pPacket);
 int AppendReponse(const char* packet, int bIsCurPack);
-void ShowLastLogInfo();
+void ShowOpLogInfo(int bIsPrintScreen);
+
 
 #endif
 

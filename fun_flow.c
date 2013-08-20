@@ -377,7 +377,7 @@ void *Flow_Thread(void* param)
 		struct s_flow_pack* pPacket = pop_queue(_packets);
 		if (NULL == pPacket) 
 		{
-			sleep(0);
+			usleep(50000);
 			continue;
 		}
 

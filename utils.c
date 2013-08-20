@@ -102,7 +102,7 @@ int open_log(const char* logfile, int level)
 ///< not thread safe.
 int logmsg(int level, const char* fmt, ... )
 {
-	static const char* _LOG_LEVEL[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
+	static const char* _LOG_LEVEL[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "FIX" };
 
 	assert(level>-1 && level<sizeof(_LOG_LEVEL)/sizeof(_LOG_LEVEL[0]));
 	assert(_logfd != NULL);

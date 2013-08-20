@@ -17,42 +17,42 @@
 #include <fun_all.h>
 #include <fun_http.h>
 #include <fun_flow.h>
+#include <cache_file.h>
 
 extern struct hosts_t *_monitor_hosts;
 extern size_t _monitor_hosts_count;
-
 extern struct hosts_t *_exclude_hosts;
 extern size_t _exclude_hosts_count;
-
 extern pthread_mutex_t _host_ip_lock;
 
 static int _srv_socket = -1;
 static int _client_socket = -1;
 static char _client_ip[16] = {0};
-
 static int _client_config_socket = -1;
 static char _client_config_ip[16] = {0};
-
 static time_t _flow_socket_start_time = 0;
+extern int _net_flow_func_on;
 
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
 static struct msg_head _msg_heart_hit = {0};
-
-static int SetupTCPServer(int server_port);
-static int Unblock(int sock);
-static int WriteSocketData(int sock, const void *pBuffer, int nWriteSize);
-static int ReadSocketData(int sock, char *pBuffer, int nReadSize);
-static int RecvData(int sock, struct msg_head *pMsgHead, char **pData);
-static int SendData(int sock, unsigned char msg_type, const void *pData, unsigned int data_length);
-static int ProcessReqGetIpList();
-static int ProcessReqSetIpList(const char *pRecvData);
+static time_t _active = 0;
+static time_t _op_log_time = 0;
 
 volatile int g_nFlagGetData = 0;
 volatile int g_nFlagSendData = 0;
 
-extern uint32_t g_nGetDataCostTime;
-extern uint32_t g_nSendDataCostTime;
+uint64_t g_nGetDataCostTime = 0;
+uint64_t g_nSendDataCostTime = 0;
+uint64_t g_nCacheDataCostTime = 0;
+int g_nSendDataCount = 0;
+int g_nMaxCacheCount = 0;
+
+static int g_bIsCheckWrite = 1;
+static int g_bIsCheckRead = 1;
+static CacheFileDef g_fileReader = {NULL, {0}, {0}, 0, 0, 0, 0, 0, 1};
+static CacheFileDef g_fileWriter = {NULL, {0}, {0}, 0, 0, 0, 0, 0, 1};
+static int g_nCacheDays = 15;
 
 int InitServer()
 {
@@ -234,8 +234,7 @@ int RecvData(int sock, struct msg_head *pMsgHead, char **pData)
 	if ((pMsgHead->type != MSG_TYPE_REQ_GET_IPLIST)
 		&& (pMsgHead->type != MSG_TYPE_REQ_SET_IPLIST)
 		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW)
-		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW_STOP)
-		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW))
+		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW_STOP))
 	{
 		LOGERROR0("Message type error!");
 		return -1;
@@ -279,7 +278,7 @@ int SetupTCPServer(int server_port)
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(server_port);
 
-	LOGINFO("Bind server, port=%d", server_port);
+	LOGFIX("Bind server, port=%d", server_port);
 	nerr = bind(_srv_socket, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
 	if (nerr < 0)
 	{
@@ -538,6 +537,339 @@ int ProcessReqSetIpList(const char *pRecvData)
 	return nSend;
 }
 
+int ProcessServerSockReq()
+{
+	int nRs = 0;
+	int	accept_socket;
+	struct sockaddr_in client_address; 
+	socklen_t client_len;
+	client_len = sizeof(client_address);
+	LOGFIX0("Process accept...");
+	accept_socket = accept(_srv_socket, (struct sockaddr *)&client_address, &client_len);
+	if (accept_socket > 0)
+	{
+		char sip[16] = {0};
+		int nPort = 0;
+		
+		Unblock(accept_socket);
+
+		inet_ntop(AF_INET, &client_address.sin_addr, sip, 16);
+		nPort = ntohs(client_address.sin_port);
+		
+		LOGFIX("%s:%d connect, accept successfully.", sip, nPort);
+
+		if ((nPort >= CLIENT_SOCKET_PORT_MIN && nPort <= CLIENT_SOCKET_PORT_MAX) || CLIENT_SOCKET_PORT == nPort)
+		{
+			if (_client_socket > 0)
+			{
+				LOGWARN0("A client has connected sensor, new connection will be closed.");
+				int nSend = SendData(accept_socket, MSG_TYPE_NOTIFY_CONNECTION_EXIST, _client_ip, strlen(_client_ip));
+				if (nSend < 0) 
+				{
+					LOGWARN0("remote socket is error or close. recontinue.");
+					close(accept_socket);
+				}
+				else
+				{
+					shutdown(accept_socket, SHUT_RDWR);
+					close(accept_socket);
+				}
+			}
+			else
+			{
+				_client_socket = accept_socket;
+				memset(_client_ip, 0, 16);
+				strcpy(_client_ip, sip);
+			}
+		}
+		else if (CLIENT_CONFIG_SOCKET_PORT == nPort)
+		{
+			if (_client_config_socket > 0)
+			{
+				LOGWARN0("A config client has connected sensor, new connection will be closed.");
+				int nSend = SendData(accept_socket, MSG_TYPE_NOTIFY_CONNECTION_EXIST, _client_config_ip, strlen(_client_config_ip));
+				if (nSend < 0) 
+				{
+					LOGWARN0("remote socket is error or close. recontinue.");
+					close(accept_socket);
+				}
+				else
+				{
+					shutdown(accept_socket, SHUT_RDWR);
+					close(accept_socket);
+				}
+			}
+			else
+			{
+				_client_config_socket = accept_socket;
+				memset(_client_config_ip, 0, 16);
+				strcpy(_client_config_ip, sip);
+			}
+		}
+		else if (CLIENT_TEST_SOCKET_PORT == nPort)
+		{
+			shutdown(accept_socket, SHUT_RDWR);
+			close(accept_socket);
+		}
+		else
+		{
+			shutdown(accept_socket, SHUT_RDWR);
+			close(accept_socket);
+		}
+	}
+	else
+		LOGERROR("accept error. [%d] %s", errno, strerror(errno));
+
+	return nRs;
+}
+
+int ProcessClientCfgSockReq()
+{
+	int nRs = 0;
+	struct msg_head msgHead;
+	char *pRecvData = NULL;
+	int nRecv = RecvData(_client_config_socket, &msgHead, &pRecvData);
+	if (nRecv < 0)
+	{
+		LOGWARN0("remote config socket is error or close. recontinue.");
+		close(_client_config_socket);
+		_client_config_socket = -1;
+		nRs = -1;
+	}
+	else
+	{
+		int nSend = 0;
+		if (MSG_TYPE_REQ_GET_IPLIST == msgHead.type)
+		{
+			nSend = ProcessReqGetIpList();
+		}
+		else if (MSG_TYPE_REQ_SET_IPLIST == msgHead.type)
+		{
+			nSend = ProcessReqSetIpList(pRecvData);
+		}
+
+		if (pRecvData != NULL)
+			free(pRecvData);
+	}
+
+	return nRs;
+}
+
+int ProcessClientSockReq()
+{
+	int nRs = 0;
+	struct msg_head msgHead;
+	char *pRecvData = NULL;
+	int nRecv = RecvData(_client_socket, &msgHead, &pRecvData);
+	if (nRecv < 0)
+	{
+		LOGWARN0("remote client socket is error or close. recontinue.");
+		close(_client_socket);
+		_client_socket = -1;
+		nRs = -1;
+	}
+	else
+	{
+		if (_net_flow_func_on)
+		{
+			if (MSG_TYPE_REQ_FLOW == msgHead.type)
+			{
+				AddServer(pRecvData);
+				if (0 == _flow_socket_start_time)
+					_flow_socket_start_time = time(NULL);
+			}
+			else if (MSG_TYPE_REQ_FLOW_STOP == msgHead.type)
+			{
+				StopServerFlow(pRecvData);
+			}
+
+			if (pRecvData != NULL)
+				free(pRecvData);
+		}
+	}
+
+	return nRs;
+}
+
+int ProcessClientSockRes()
+{
+	int nRs = 0;
+	char *data = NULL;
+	int datalen = 0;
+	int nSend = 0;
+	g_nFlagGetData = 0;
+
+	if (g_bIsCheckRead)
+	{
+		if (g_fileWriter.pFile != NULL)
+			CleanCacheFile(&g_fileWriter, 0);
+
+		if (GetLatestCacheFile(&g_fileReader) < 0)
+		{
+			LOGINFO0("Can not get the latest cache file for read.");
+		}
+		else
+		{
+			LOGINFO("Get the latest cache file for read, \n \
+				     file name is %s, version = %s, size=%llu, readcount=%d, writecount=%d, readoffset=%llu, writeoffset=%llu", 
+						g_fileReader.szFileName,
+						g_fileReader.szVersion,
+						g_fileReader.nFileSize,
+						g_fileReader.nReadCount, 
+						g_fileReader.nWriteCount,
+						g_fileReader.nReadOffset,
+						g_fileReader.nWriteOffset);
+		}
+
+		g_bIsCheckRead = 0;
+		g_bIsCheckWrite = 1;
+	}
+
+	int bIsFromCacheFile = 0;
+	struct timeval tvBeforGet;
+	gettimeofday(&tvBeforGet, NULL);
+	if (((datalen = GetHttpData(&data)) == 0) && (g_fileReader.pFile != NULL))
+	{
+		datalen = ReadNextCacheRecord(&g_fileReader, &data);
+		bIsFromCacheFile = 1;
+
+		if (datalen < 0) 
+		{
+			if (datalen != -1)
+			{
+				LOGERROR("Fail to read data from cache file, return code= %d \n \
+						  file name is %s, version = %s, size=%llu, readcount=%d, writecount=%d, readoffset=%llu, writeoffset=%llu",
+						  	datalen,
+							g_fileReader.szFileName,
+							g_fileReader.szVersion,
+							g_fileReader.nFileSize,
+							g_fileReader.nReadCount, 
+							g_fileReader.nWriteCount,
+							g_fileReader.nReadOffset,
+							g_fileReader.nWriteOffset);
+				CleanCacheFile(&g_fileReader, 0);
+			}
+			else
+			{
+				LOGWARN("Read cache file to end, return code= %d \n \
+						  file name is %s, version = %s, size=%llu, readcount=%d, writecount=%d, readoffset=%llu, writeoffset=%llu",
+						  	datalen,
+							g_fileReader.szFileName,
+							g_fileReader.szVersion,
+							g_fileReader.nFileSize,
+							g_fileReader.nReadCount, 
+							g_fileReader.nWriteCount,
+							g_fileReader.nReadOffset,
+							g_fileReader.nWriteOffset);
+				CleanCacheFile(&g_fileReader, 1);
+			}
+			g_bIsCheckRead = 1;
+		}
+	}
+
+	if (datalen > 0) 
+	{
+		struct timeval tvAfterGet;
+		gettimeofday(&tvAfterGet, NULL);
+		g_nGetDataCostTime += (tvAfterGet.tv_sec-tvBeforGet.tv_sec)*1000000+(tvAfterGet.tv_usec-tvBeforGet.tv_usec);
+		g_nFlagGetData = 1;
+		g_nFlagSendData = 0;
+		
+		LOGDEBUG("Ready to send data, datalen = %d, data = %s", datalen, data);
+		
+		struct timeval tvBeforSend;
+		gettimeofday(&tvBeforSend, NULL);
+		if ((nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen)) > 0)
+		{
+			++g_nSendDataCount;
+			LOGINFO("Success to send data, Send data count = %d.", g_nSendDataCount);	
+		}
+		
+		struct timeval tvAfterSend;
+		gettimeofday(&tvAfterSend, NULL);
+		g_nSendDataCostTime += (tvAfterSend.tv_sec-tvBeforSend.tv_sec)*1000000+(tvAfterSend.tv_usec-tvBeforSend.tv_usec);
+		free(data);
+		g_nFlagSendData = 1;
+
+		if (bIsFromCacheFile)
+		{
+			if (IsReadEnd(&g_fileReader))
+			{
+				LOGINFO("Read cache file to end, \n \
+						  file name is %s, version = %s, size=%llu, readcount=%d, writecount=%d, readoffset=%llu, writeoffset=%llu",
+						  	g_fileReader.szFileName,
+							g_fileReader.szVersion,
+							g_fileReader.nFileSize,
+							g_fileReader.nReadCount, 
+							g_fileReader.nWriteCount,
+							g_fileReader.nReadOffset,
+							g_fileReader.nWriteOffset);
+				CleanCacheFile(&g_fileReader, 1);
+				g_bIsCheckRead = 1;
+			}
+		}
+		
+		if (nSend < 0) 
+		{
+			LOGWARN0("remote client socket is error or close. recontinue.");
+			close(_client_socket);
+			_client_socket = -1;
+			return -1;
+		}
+		_active = time(NULL);
+	}
+	g_nFlagGetData = 1;
+
+	if (_net_flow_func_on)
+	{
+		if ((_flow_socket_start_time != 0) && (time(NULL) - _flow_socket_start_time > FLOW_SEND_INTERVAL_TIME))
+		{
+			int nServerCount = GetServerCount();
+			LOGDEBUG("Ready to send flow info, Server flow count = %d", nServerCount);
+			if (nServerCount > 0)
+			{
+				time_t tmNow = time(NULL);
+				for (int i = 0; i < MAX_FLOW_SESSIONS; i++)
+				{
+					if ((datalen = GetFlowData(i, tmNow, &data)) > 0)
+					{
+						LOGDEBUG("Send flow data of _flow_session[%d]", i);
+						nSend = SendData(_client_socket, MSG_TYPE_RES_FLOW_DATA, data, datalen);
+						free((void*)data);
+						if (nSend < 0) 
+						{
+							LOGWARN0("remote client socket is error or close. recontinue.");
+							close(_client_socket);
+							_client_socket = -1;
+							return -2;
+						}	
+					}
+				}
+				
+				_flow_socket_start_time = time(NULL);
+			}
+			else
+			{
+				_flow_socket_start_time = 0;
+			}
+		}
+	}
+	
+	if (time(NULL) - _active > 10) 
+	{
+		_active = time(NULL);
+		nSend = SendData(_client_socket, MSG_TYPE_HEARTHIT, NULL, 0);
+		if (nSend < 0) {
+			LOGWARN0("remote client socket is error or close. recontinue.");
+			close(_client_socket);
+			_client_socket = -1;
+			return -3;
+		}
+	}
+
+	return nRs;
+}
+
 void* server_thread(void* p)
 {
 	char szPort[10] = {0};
@@ -559,17 +891,21 @@ thread_start:
 	
 	int nerr = 0;
 	fd_set rfds;
-	fd_set wfds;
 	struct timeval tv;
 	int retval = 0;
 	int max_socket = 0;
-	time_t active = time(NULL);
+	_active = time(NULL);
+	_op_log_time = time(NULL);
+	
 	while (_runing) 
 	{
-while_start:
-	
+		if (time(NULL) - _op_log_time > LOG_OP_INTERVAL)
+		{
+			ShowOpLogInfo(0);
+			_op_log_time = time(NULL);
+		}
+		
 		FD_ZERO(&rfds);
-		FD_ZERO(&wfds);
 		tv.tv_sec = 0;
 		tv.tv_usec = SELECT_TIMEOUT;
 
@@ -605,118 +941,17 @@ while_start:
 			}
 			goto thread_start;
 		}
-
+		
 		if (FD_ISSET(_srv_socket, &rfds))
 		{
-			int	accept_socket;
-			struct sockaddr_in client_address; 
-			socklen_t client_len;
-			client_len = sizeof(client_address);
-			LOGINFO0("Process accept...");
-			accept_socket = accept(_srv_socket, (struct sockaddr *)&client_address, &client_len);
-			if (accept_socket > 0)
-			{
-				char sip[16] = {0};
-				int nPort = 0;
-				
-				Unblock(accept_socket);
-
-				inet_ntop(AF_INET, &client_address.sin_addr, sip, 16);
-				nPort = ntohs(client_address.sin_port);
-				
-				LOGINFO("%s:%d connect, accept successfully.", sip, nPort);
-
-				if ((nPort >= CLIENT_SOCKET_PORT_MIN && nPort <= CLIENT_SOCKET_PORT_MAX) || CLIENT_SOCKET_PORT == nPort)
-				{
-					if (_client_socket > 0)
-					{
-						LOGWARN0("A client has connected sensor, new connection will be closed.");
-						int nSend = SendData(accept_socket, MSG_TYPE_NOTIFY_CONNECTION_EXIST, _client_ip, strlen(_client_ip));
-						if (nSend < 0) 
-						{
-							LOGWARN0("remote socket is error or close. recontinue.");
-							close(accept_socket);
-						}
-						else
-						{
-							shutdown(accept_socket, SHUT_RDWR);
-							close(accept_socket);
-						}
-					}
-					else
-					{
-						_client_socket = accept_socket;
-						memset(_client_ip, 0, 16);
-						strcpy(_client_ip, sip);
-					}
-				}
-				else if (CLIENT_CONFIG_SOCKET_PORT == nPort)
-				{
-					if (_client_config_socket > 0)
-					{
-						LOGWARN0("A config client has connected sensor, new connection will be closed.");
-						int nSend = SendData(accept_socket, MSG_TYPE_NOTIFY_CONNECTION_EXIST, _client_config_ip, strlen(_client_config_ip));
-						if (nSend < 0) 
-						{
-							LOGWARN0("remote socket is error or close. recontinue.");
-							close(accept_socket);
-						}
-						else
-						{
-							shutdown(accept_socket, SHUT_RDWR);
-							close(accept_socket);
-						}
-					}
-					else
-					{
-						_client_config_socket = accept_socket;
-						memset(_client_config_ip, 0, 16);
-						strcpy(_client_config_ip, sip);
-					}
-				}
-				else if (CLIENT_TEST_SOCKET_PORT == nPort)
-				{
-					shutdown(accept_socket, SHUT_RDWR);
-					close(accept_socket);
-				}
-				else
-				{
-					shutdown(accept_socket, SHUT_RDWR);
-					close(accept_socket);
-				}
-			}
-			else
-				LOGERROR("accept error. [%d] %s", errno, strerror(errno));
+			ProcessServerSockReq();
 		}
-
+		
 		if (_client_config_socket > 0)
 		{
 			if (FD_ISSET(_client_config_socket, &rfds))
 			{
-				struct msg_head msgHead;
-				char *pRecvData = NULL;
-				int nRecv = RecvData(_client_config_socket, &msgHead, &pRecvData);
-				if (nRecv < 0)
-				{
-					LOGWARN0("remote config socket is error or close. recontinue.");
-					close(_client_config_socket);
-					_client_config_socket = -1;
-				}
-				else
-				{
-					int nSend = 0;
-					if (MSG_TYPE_REQ_GET_IPLIST == msgHead.type)
-					{
-						nSend = ProcessReqGetIpList();
-					}
-					else if (MSG_TYPE_REQ_SET_IPLIST == msgHead.type)
-					{
-						nSend = ProcessReqSetIpList(pRecvData);
-					}
-
-					if (pRecvData != NULL)
-						free(pRecvData);
-				}
+				ProcessClientCfgSockReq();
 			}
 		}
 
@@ -724,113 +959,17 @@ while_start:
 		{
 			if (FD_ISSET(_client_socket, &rfds))
 			{
-				struct msg_head msgHead;
-				char *pRecvData = NULL;
-				int nRecv = RecvData(_client_socket, &msgHead, &pRecvData);
-				if (nRecv < 0)
-				{
-					LOGWARN0("remote client socket is error or close. recontinue.");
-					close(_client_socket);
-					_client_socket = -1;
-				}
-				else
-				{
-					if (MSG_TYPE_REQ_FLOW == msgHead.type)
-					{
-						AddServer(pRecvData);
-						if (0 == _flow_socket_start_time)
-							_flow_socket_start_time = time(NULL);
-					}
-					else if (MSG_TYPE_REQ_FLOW_STOP == msgHead.type)
-					{
-						StopServerFlow(pRecvData);
-					}
-
-					if (pRecvData != NULL)
-						free(pRecvData);
-				}
+				ProcessClientSockReq();
 			}
 
 			if (_client_socket > 0)
 			{
-				char *data = NULL;
-				size_t datalen = 0;
-				int nSend = 0;
-				g_nFlagGetData = 0;
-
-				struct timeval tvBeforGet;
-				gettimeofday(&tvBeforGet, NULL);
-				if ((datalen = GetHttpData(&data)) > 0) 
-				{
-					struct timeval tvAfterGet;
-					gettimeofday(&tvAfterGet, NULL);
-					g_nGetDataCostTime += (tvAfterGet.tv_sec-tvBeforGet.tv_sec)*1000000+(tvAfterGet.tv_usec-tvBeforGet.tv_usec);
-					g_nFlagGetData = 1;
-					g_nFlagSendData = 0;
-					LOGDEBUG("send http_info[%d] %s", datalen, data);
-					struct timeval tvBeforSend;
-					gettimeofday(&tvBeforSend, NULL);
-					nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
-					struct timeval tvAfterSend;
-					gettimeofday(&tvAfterSend, NULL);
-					g_nSendDataCostTime += (tvAfterSend.tv_sec-tvBeforSend.tv_sec)*1000000+(tvAfterSend.tv_usec-tvBeforSend.tv_usec);
-					free((void*)data);
-					g_nFlagSendData = 1;
-					if (nSend < 0) 
-					{
-						LOGWARN0("remote client socket is error or close. recontinue.");
-						close(_client_socket);
-						_client_socket = -1;
-						goto while_start;
-					}
-					active = time(NULL);
-				}
-				g_nFlagGetData = 1;
-				
-				if ((_flow_socket_start_time != 0) && (time(NULL) - _flow_socket_start_time > FLOW_SEND_INTERVAL_TIME))
-				{
-					int nServerCount = GetServerCount();
-					LOGDEBUG("Ready to send flow info, Server flow count = %d", nServerCount);
-					if (nServerCount > 0)
-					{
-						time_t tmNow = time(NULL);
-						for (int i = 0; i < MAX_FLOW_SESSIONS; i++)
-						{
-							if ((datalen = GetFlowData(i, tmNow, &data)) > 0)
-							{
-								LOGDEBUG("Send flow data of _flow_session[%d]", i);
-								nSend = SendData(_client_socket, MSG_TYPE_RES_FLOW_DATA, data, datalen);
-								free((void*)data);
-								if (nSend < 0) 
-								{
-									LOGWARN0("remote client socket is error or close. recontinue.");
-									close(_client_socket);
-									_client_socket = -1;
-									goto while_start;
-								}	
-							}
-						}
-						
-						_flow_socket_start_time = time(NULL);
-					}
-					else
-					{
-						_flow_socket_start_time = 0;
-					}
-				}
-				
-				if (time(NULL) - active > 10) 
-				{
-					active = time(NULL);
-					nSend = SendData(_client_socket, MSG_TYPE_HEARTHIT, NULL, 0);
-					if (nSend < 0) {
-						LOGWARN0("remote client socket is error or close. recontinue.");
-						close(_client_socket);
-						_client_socket = -1;
-						goto while_start;
-					}
-				}
+				ProcessClientSockRes();
 			}
+		}
+		else
+		{
+			LocalCacheFile();
 		}
 	}
 
@@ -845,12 +984,136 @@ while_start:
 	return NULL;
 }
 
+int LocalCacheFile()
+{
+	int nRs = -1;
+
+	if (NULL == g_fileWriter.pFile)
+	{
+		if (g_bIsCheckWrite)
+		{
+			if (!IsCacheFullDays(g_nCacheDays))
+			{
+				int nGetFileRs = 0;
+				if (g_fileReader.pFile != NULL)
+					CleanCacheFile(&g_fileReader, 0);
+
+				nGetFileRs = GetCacheFileForWrite(&g_fileWriter);
+				if (nGetFileRs < 0)
+				{
+					LOGWARN("Can not get cache file for write. Return code = %d", nGetFileRs);
+				}
+				else
+				{
+					LOGINFO("Get the cache file for write, \n \
+							file name is %s, version = %s, size=%llu, readcount=%d, writecount=%d, readoffset=%llu, writeoffset=%llu", 
+								g_fileWriter.szFileName,
+								g_fileWriter.szVersion,
+								g_fileWriter.nFileSize,
+								g_fileWriter.nReadCount, 
+								g_fileWriter.nWriteCount,
+								g_fileWriter.nReadOffset,
+								g_fileWriter.nWriteOffset);
+					nRs = 0;
+				}
+			}
+			else
+			{
+				LOGWARN("Cache days is more than full days(%d), cache stop!", g_nCacheDays);
+			}
+
+			g_bIsCheckWrite = 0;
+			g_bIsCheckRead = 1;
+		}
+	}
+
+	if (g_fileWriter.pFile != NULL)
+	{
+		char *pData = NULL;
+		int nDataLen = 0;
+		int nWriteRs = 0;
+		if ((nDataLen = GetHttpData(&pData)) > 0) 
+		{
+			LOGDEBUG("Cache http_info[%d] %s", nDataLen, pData);
+			struct timeval tvBeforWrite, tvAfterWrite;
+			gettimeofday(&tvBeforWrite, NULL);
+			nWriteRs = WriteNextCacheRecord(&g_fileWriter, pData, nDataLen);
+			gettimeofday(&tvAfterWrite, NULL);
+			g_nCacheDataCostTime += (tvAfterWrite.tv_sec-tvBeforWrite.tv_sec)*1000000+(tvAfterWrite.tv_usec-tvBeforWrite.tv_usec);
+			free((void*)pData);
+			if (nWriteRs < 0) 
+			{
+				LOGERROR("Fail to write data to cache file, return code= %d \n \
+						  file name is %s, version = %s, size=%llu, readcount=%d, writecount=%d, readoffset=%llu, writeoffset=%llu",
+						  	nWriteRs,
+							g_fileWriter.szFileName,
+							g_fileWriter.szVersion,
+							g_fileWriter.nFileSize,
+							g_fileWriter.nReadCount, 
+							g_fileWriter.nWriteCount,
+							g_fileWriter.nReadOffset,
+							g_fileWriter.nWriteOffset);
+
+				CleanCacheFile(&g_fileWriter, 0);
+				g_bIsCheckWrite = 1;
+				nRs = -2;
+			}
+			else
+			{
+				++g_nMaxCacheCount;
+				LOGINFO("Success to cache data, Cache data count = %d.", g_nMaxCacheCount);
+				if (IsWriteFull(&g_fileWriter))
+				{
+					LOGINFO("Cache file is writed full, \n \
+							  file name is %s, version = %s, size=%llu, readcount=%d, writecount=%d, readoffset=%llu, writeoffset=%llu",
+								g_fileWriter.szFileName,
+								g_fileWriter.szVersion,
+								g_fileWriter.nFileSize,
+								g_fileWriter.nReadCount, 
+								g_fileWriter.nWriteCount,
+								g_fileWriter.nReadOffset,
+								g_fileWriter.nWriteOffset);
+					
+					CleanCacheFile(&g_fileWriter, 0);
+					g_bIsCheckWrite = 1;
+				}
+
+				nRs = nWriteRs;
+			}
+		}
+	}
+	
+	return nRs;
+}
+
 int StartServer()
 {
 	_msg_heart_hit.version = MSG_NORMAL_VER;
 	_msg_heart_hit.type = MSG_TYPE_HEARTHIT;
 	_msg_heart_hit.length = htonl(0);
 
+	char szCacheDays[10] = {0};
+	GetValue(CONFIG_PATH, "cache_days", szCacheDays, 3);
+	if (strlen(szCacheDays) != 0)
+	{
+		g_nCacheDays = atoi(szCacheDays);
+		if (g_nCacheDays < 0 || g_nCacheDays > 50)
+			g_nCacheDays = 15;
+	}
+
+	int nCacheFileSize = 2048;
+	char szCacheFileSize[10] = {0};
+	GetValue(CONFIG_PATH, "cache_file_size", szCacheFileSize, 6);
+	if (strlen(szCacheFileSize) != 0)
+	{
+		nCacheFileSize = atoi(szCacheFileSize);
+		if (nCacheFileSize >= 1 && nCacheFileSize <= 10240)
+			SetCacheFileSize(nCacheFileSize);
+	}
+
+	printf("cache_full_day = %d\n", g_nCacheDays);
+	printf("cache_file_size = %d\n", nCacheFileSize);
+		
 	int nerr = pthread_create(&_srv_thread, NULL, server_thread, NULL);
 	return nerr;
 }

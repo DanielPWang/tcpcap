@@ -84,7 +84,7 @@ int OpenMonitorDevs()
 	char* value = (char*)calloc(1,1024);
 	ASSERT(value!=NULL);
 	if (GetValue(CONFIG_PATH, "monitor", value, 1024)==NULL || value[0]=='\0') {
-		LOGFATAL("cannt get monitor from %s", CONFIG_PATH);
+		LOGFATAL("Can not get monitor info from %s", CONFIG_PATH);
 		abort();
 	}
 
@@ -126,7 +126,6 @@ int CapturePacket(char* buffer, size_t size)
 	int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
 	if (nfds < 1 ) return 0;	// test exit.
 
-	// TODO: this is a example implent
 	struct sockaddr_in sa;
 	size_t salen = sizeof(sa);
 

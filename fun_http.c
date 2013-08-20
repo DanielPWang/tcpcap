@@ -36,10 +36,6 @@ pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static struct queue_t *_packets = NULL;
 
-static time_t _push_pack_last_time = 0;
-//static time_t _new_session_last_time = 0;
-
-
 static int g_nCountWholeContentFull = 0;
 static int g_nDropCountForPacketFull = 0;
 static int g_nDropCountForSessionFull = 0;
@@ -57,20 +53,27 @@ static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
 static uint64_t g_nHttpLen = 0;
 static uint64_t g_nPushedPackCount = 0;
-static uint64_t g_nSkippedPackCount = 0;
 static uint32_t g_nSessionFisrtTime = 0;
 static uint32_t g_nSessionLastTime = 0;
+uint64_t g_nSkippedPackCount = 0;
 
-uint64_t g_CapCount = 0;
-uint64_t g_CapSize = 0;
-uint32_t g_nCapFisrtTime = 0;
-uint32_t g_nCapLastTime = 0;
 static int g_nSessionCount = 0;
 static int g_nMaxUsedPackSize = 0;
 static int g_nMaxUsedSessionSize = 0;
 static int g_bIsCapRes = 0;
-uint32_t g_nGetDataCostTime = 0;
-uint32_t g_nSendDataCostTime = 0;
+
+static int g_nGzipCount = 0;
+static int g_nUnGzipFailCount = 0;
+
+extern uint64_t g_nCapCount;
+extern uint64_t g_nCapSize;
+extern uint32_t g_nCapFisrtTime;
+extern uint32_t g_nCapLastTime;
+extern uint64_t g_nGetDataCostTime;
+extern uint64_t g_nSendDataCostTime;
+extern uint64_t g_nCacheDataCostTime;
+extern int g_nSendDataCount;
+extern int g_nMaxCacheCount;
 
 static int g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 static int g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
@@ -129,101 +132,135 @@ static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
 
-// TODO: å…ˆä¸å¤„ç†ignoreå’Œuri
-//
-int isRelation(const struct iphdr *ip, const struct tcphdr *tcp,
-		const struct tcp_session* session)
+void ShowOpLogInfo(int bIsPrintScreen)
 {
-	// TODO
-	return 1;
-}
-
-void ShowLastLogInfo()
-{
+	static uint32_t nPreCapTime = 0;
+	uint32_t nIntervalCostTime = 0;
 	int nCurSessionUsedCount = g_nMaxHttpSessionCount - len_queue(_idl_session);
-
-	LOGINFO("\n \
-		g_nDropCountForPacketFull = %d \n \
-		g_nDropCountForSessionFull = %d \n \
-		g_nDropCountForImage = %d \n \
-		g_nTimeOutCount = %d \n \
-		g_nReusedCount = %d \n \
-		g_nLaterPackIsMaxCount = %d \n \
-		g_nContentErrorCount = %d (g_nContentUnknownCount=%d g_nHttpNullCount=%d g_nDatalenErrorCount=%d g_nHttpcodeErrorCount=%d) \n \
-		g_nPushedPackCount = %llu \n \
-		g_nSessionCount = %d \n \
-		g_nMaxUsedPackSize = %d \n \
-		g_nMaxUsedSessionSize = %d \n \
-		nCurSessionUsedCount = %d \n \
-		g_nHttpLen = %llu \n \
-		total capture %llu packets\n \
-		total capture %llu byte packets \n \
-		%llu packets is skipped \n \
-		total capture time is %u seconds \n \
-		total processing session time is %u seconds \n \
-		total cost time of getting data is %u msecs \n \
-		total cost time of sending data is %u msecs \n", g_nDropCountForPacketFull, 
+	if (0 == nPreCapTime)
+	{
+		nIntervalCostTime = g_nCapLastTime - g_nCapFisrtTime;
+		nPreCapTime = g_nCapLastTime;
+	}
+	else
+	{
+		nIntervalCostTime = g_nCapLastTime - nPreCapTime;
+	}
+	uint64_t nFlow = g_nCapSize / nIntervalCostTime;
+	nFlow = (nFlow*8) / (1024*1024);
+		
+	LOGFIX("\n \
+		¹²×¥È¡%llu¸ö°ü[%llu×Ö½Ú] \n \
+		±³¾°Á÷Á¿%llu Mbps[µ±Ç°%uÃë] \n \
+		¹²¹ýÂË%llu¸ö°üÈë°ü¶ÓÁÐ \n \
+		¹²¹ýÂË¶ªÆú%llu¸ö°ü \n \
+		¶ªÆú%d¸ö°ü[°ü¶ÓÁÐÒç³ö] \n \
+		°ü¶ÓÁÐÊ¹ÓÃ×î´óÖµ = %d \n \
+		\n \
+		¹²´´½¨%d»á»° \n \
+		·ÅÆú´´½¨%d¸ö»á»°[»á»°Òç³ö] \n \
+		·ÅÆú´´½¨%d¸ö»á»°[Í¼Æ¬/JSÀàÊý¾Ý] \n \
+		¶ªÆú%d¸ö»á»°[»á»°³¬Ê±] \n \
+		¶ªÆú%d¸ö»á»°[»á»°Í¨µÀ±»ÖØÓÃ] \n \
+		¶ªÆú%d¸ö»á»°[»á»°ÂÒÐòÖØ×é»º´æ¶ÓÁÐÒç³ö] \n \
+		¶ªÆú%d¸ö»á»°[ÄÚÈÝÎÊÌâ:Î´ÖªÄÚÈÝÀàÐÍÊý=%d; HttpÄÚÈÝÖ¸ÕëÎª¿ÕÊý=%d; ÄÚÈÝ³¤¶È³ö´íÊý=%d; ·µ»ØhttpÐ­Òé±êÊ¶»ñÈ¡Ê§°ÜÊý=%d] \n \
+		ÒÅÁô%d¸ö»á»°[µ±Ç°»á»°¶ÓÁÐÖÐµÄ»á»°Êý] \n \
+		¹²·¢ËÍ%d¸öHttpÊý¾Ý[Íê³É»á»°µÄHttpÊý¾Ý] \n \
+		±¾µØ»º´æ%d¸öHttpÊý¾Ý \n \
+		»á»°¶ÓÁÐÊ¹ÓÃ×î´óÖµ = %d \n \
+		µ¯³ö»á»°¶ÓÁÐµÄ»á»°ÄÚÈÝ×Ü´óÐ¡Îª%llu×Ö½Ú \n \
+		¹²ÓÐ%dGzip»á»°Êý¾Ý[ÆäÖÐ%d¸öGzip½âÑ¹Ê§°Ü] \n \
+		\n \
+		°ü×¥È¡×ÜºÄÊ±%uÃë \n \
+		»á»°´¦Àí×ÜºÄÊ±%uÃë \n \
+		»ñÈ¡HttpÊý¾Ý´¦Àí×ÜºÄÊ±%lluºÁÃë \n \
+		·¢ËÍHttpÊý¾Ý´¦Àí×ÜºÄÊ±%lluºÁÃë \n \
+		±¾µØ»º´æHttpÊý¾Ý´¦Àí×ÜºÄÊ±%lluºÁÃë \n", 
+		g_nCapCount,
+		g_nCapSize,
+		nFlow,
+		nIntervalCostTime,
+		g_nPushedPackCount,
+		g_nSkippedPackCount,
+		g_nDropCountForPacketFull, 
+		g_nMaxUsedPackSize,
+		g_nSessionCount,
 		g_nDropCountForSessionFull, 
 		g_nDropCountForImage,
 		g_nTimeOutCount,
 		g_nReusedCount,
 		g_nLaterPackIsMaxCount,
 		g_nContentErrorCount, g_nContentUnknownCount, g_nHttpNullCount, g_nDatalenErrorCount, g_nHttpcodeErrorCount,
-		g_nPushedPackCount,
-		g_nSessionCount,
-		g_nMaxUsedPackSize,
-		g_nMaxUsedSessionSize,
 		nCurSessionUsedCount,
+		g_nSendDataCount,
+		g_nMaxCacheCount,
+		g_nMaxUsedSessionSize,
 		g_nHttpLen,
-		g_CapCount,
-		g_CapSize,
-		g_nSkippedPackCount,
+		g_nGzipCount,
+		g_nUnGzipFailCount,
 		g_nCapLastTime - g_nCapFisrtTime,
 		g_nSessionLastTime - g_nSessionFisrtTime,
 		g_nGetDataCostTime/1000,
-		g_nSendDataCostTime/1000);
+		g_nSendDataCostTime/1000,
+		g_nCacheDataCostTime/1000);
 
-	
-	printf("\n \
-		g_nDropCountForPacketFull = %d \n \
-		g_nDropCountForSessionFull = %d \n \
-		g_nDropCountForImage = %d \n \
-		g_nTimeOutCount = %d \n \
-		g_nReusedCount = %d \n \
-		g_nLaterPackIsMaxCount = %d \n \
-		g_nContentErrorCount = %d (g_nContentUnknownCount=%d g_nHttpNullCount=%d g_nDatalenErrorCount=%d g_nHttpcodeErrorCount=%d) \n \
-		g_nPushedPackCount = %llu \n \
-		g_nSessionCount = %d \n \
-		g_nMaxUsedPackSize = %d \n \
-		g_nMaxUsedSessionSize = %d \n \
-		nCurSessionUsedCount = %d \n \
-		g_nHttpLen = %llu \n \
-		total capture %llu packets\n \
-		total capture %llu byte packets \n \
-		%llu packets is skipped \n \
-		total capture time is %u seconds \n \
-		total processing session time is %u seconds \n \
-		total cost time of getting data is %u msecs \n \
-		total cost time of sending data is %u msecs \n", g_nDropCountForPacketFull, 
-		g_nDropCountForSessionFull, 
-		g_nDropCountForImage,
-		g_nTimeOutCount,
-		g_nReusedCount,
-		g_nLaterPackIsMaxCount,
-		g_nContentErrorCount, g_nContentUnknownCount, g_nHttpNullCount, g_nDatalenErrorCount, g_nHttpcodeErrorCount,
-		g_nPushedPackCount,
-		g_nSessionCount,
-		g_nMaxUsedPackSize,
-		g_nMaxUsedSessionSize,
-		nCurSessionUsedCount,
-		g_nHttpLen,
-		g_CapCount,
-		g_CapSize,
-		g_nSkippedPackCount,
-		g_nCapLastTime - g_nCapFisrtTime,
-		g_nSessionLastTime - g_nSessionFisrtTime,
-		g_nGetDataCostTime/1000,
-		g_nSendDataCostTime/1000);
+	if (bIsPrintScreen)
+	{
+		printf("\n \
+			¹²×¥È¡%llu¸ö°ü[%llu×Ö½Ú] \n \
+			±³¾°Á÷Á¿%llu Mbps[µ±Ç°%uÃë] \n \
+			¹²¹ýÂË%llu¸ö°üÈë°ü¶ÓÁÐ \n \
+			¹²¹ýÂË¶ªÆú%llu¸ö°ü \n \
+			¶ªÆú%d¸ö°ü[°ü¶ÓÁÐÒç³ö] \n \
+			°ü¶ÓÁÐÊ¹ÓÃ×î´óÖµ = %d \n \
+			\n \
+			¹²´´½¨%d»á»° \n \
+			·ÅÆú´´½¨%d¸ö»á»°[»á»°Òç³ö] \n \
+			·ÅÆú´´½¨%d¸ö»á»°[Í¼Æ¬/JSÀàÊý¾Ý] \n \
+			¶ªÆú%d¸ö»á»°[»á»°³¬Ê±] \n \
+			¶ªÆú%d¸ö»á»°[»á»°Í¨µÀ±»ÖØÓÃ] \n \
+			¶ªÆú%d¸ö»á»°[»á»°ÂÒÐòÖØ×é»º´æ¶ÓÁÐÒç³ö] \n \
+			¶ªÆú%d¸ö»á»°[ÄÚÈÝÎÊÌâ:Î´ÖªÄÚÈÝÀàÐÍÊý=%d; HttpÄÚÈÝÖ¸ÕëÎª¿ÕÊý=%d; ÄÚÈÝ³¤¶È³ö´íÊý=%d; ·µ»ØhttpÐ­Òé±êÊ¶»ñÈ¡Ê§°ÜÊý=%d] \n \
+			ÒÅÁô%d¸ö»á»°[µ±Ç°»á»°¶ÓÁÐÖÐµÄ»á»°Êý] \n \
+			¹²·¢ËÍ%d¸öHttpÊý¾Ý[Íê³É»á»°µÄHttpÊý¾Ý] \n \
+			±¾µØ»º´æ%d¸öHttpÊý¾Ý \n \
+			»á»°¶ÓÁÐÊ¹ÓÃ×î´óÖµ = %d \n \
+			µ¯³ö»á»°¶ÓÁÐµÄ»á»°ÄÚÈÝ×Ü´óÐ¡Îª%llu×Ö½Ú \n \
+			¹²ÓÐ%dGzip»á»°Êý¾Ý[ÆäÖÐ%d¸öGzip½âÑ¹Ê§°Ü] \n \
+			\n \
+			°ü×¥È¡×ÜºÄÊ±%uÃë \n \
+			»á»°´¦Àí×ÜºÄÊ±%uÃë \n \
+			»ñÈ¡HttpÊý¾Ý´¦Àí×ÜºÄÊ±%lluºÁÃë \n \
+			·¢ËÍHttpÊý¾Ý´¦Àí×ÜºÄÊ±%lluºÁÃë \n \
+			±¾µØ»º´æHttpÊý¾Ý´¦Àí×ÜºÄÊ±%lluºÁÃë \n", 
+			g_nCapCount,
+			g_nCapSize,
+			nFlow,
+			nIntervalCostTime,
+			g_nPushedPackCount,
+			g_nSkippedPackCount,
+			g_nDropCountForPacketFull, 
+			g_nMaxUsedPackSize,
+			g_nSessionCount,
+			g_nDropCountForSessionFull, 
+			g_nDropCountForImage,
+			g_nTimeOutCount,
+			g_nReusedCount,
+			g_nLaterPackIsMaxCount,
+			g_nContentErrorCount, g_nContentUnknownCount, g_nHttpNullCount, g_nDatalenErrorCount, g_nHttpcodeErrorCount,
+			nCurSessionUsedCount,
+			g_nSendDataCount,
+			g_nMaxCacheCount,
+			g_nMaxUsedSessionSize,
+			g_nHttpLen,
+			g_nGzipCount,
+			g_nUnGzipFailCount,
+			g_nCapLastTime - g_nCapFisrtTime,
+			g_nSessionLastTime - g_nSessionFisrtTime,
+			g_nGetDataCostTime/1000,
+			g_nSendDataCostTime/1000,
+			g_nCacheDataCostTime/1000);
+	}
 }
 
 struct tcp_session* GetHttpSession(const struct iphdr* iphead, const struct tcphdr* tcphead)
@@ -301,7 +338,7 @@ int NewHttpSession(const char* packet)
 		else if (content[i] == '\n')
 		{
 			enter = &content[i];
-			LOGERROR0("The end of first pack head line is N!");
+			LOGWARN0("The end of first pack head line is N!");
 			break;
 		}
 	}
@@ -368,13 +405,15 @@ int NewHttpSession(const char* packet)
 			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source && 
 				pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest) 
 			{ // client -> server be reuse.
-				LOGWARN("session[%d] channel is reused. flag=%d res1=%d res2=%d g_nReusedCount=%d", index, pREQ->flag, pREQ->res1, pREQ->res2, ++g_nReusedCount);
+				++g_nReusedCount;
+				LOGWARN("session[%d] channel is reused. flag=%d res1=%d res2=%d g_nReusedCount=%d", index, pREQ->flag, pREQ->res1, pREQ->res2, g_nReusedCount);
 				CleanHttpSession(pREQ);
 				break;
 			} 
 			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout) 
 			{
-				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
+				++g_nTimeOutCount;
+				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
 				LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
 				CleanHttpSession(pREQ);
 				break;
@@ -435,8 +474,9 @@ int NewHttpSession(const char* packet)
 	{
 		g_nMaxUsedSessionSize = nSessionSize;
 	}
-		
-	LOGINFO("********* Current Session Count = %d , Max Used Session Buffer Size = %d ! *********", ++g_nSessionCount, g_nMaxUsedSessionSize);	
+
+	++g_nSessionCount;
+	LOGINFO("Current Session Count = %d , Max Used Session Buffer Size = %d !", g_nSessionCount, g_nMaxUsedSessionSize);	
 
 	return index;
 }
@@ -481,6 +521,11 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		{
 			LOGDEBUG("Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
 					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+
+			if ((*(unsigned*)content == _http_image) && (pSession->transfer_flag != HTTP_TRANSFER_INIT))
+			{
+				return HTTP_APPEND_DROP_PACKET;
+			}
 		}
 		else 
 		{
@@ -506,10 +551,11 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				}
 				else
 				{
-					CleanHttpSession(pSession);
+					++g_nLaterPackIsMaxCount;
 					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u, g_nLaterPackIsMaxCount = %d", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, ++g_nLaterPackIsMaxCount);
-
+							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, g_nLaterPackIsMaxCount);
+					CleanHttpSession(pSession);
+					
 					return HTTP_APPEND_DROP_PACKET;
 				}
 			}
@@ -549,10 +595,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	pSession->lastdata = (void*)pPacket;
 
 	// reponse length
-	if ((*(unsigned*)content == _http_image)
+	if (((*(unsigned*)content == _http_image) && (HTTP_TRANSFER_INIT == pSession->transfer_flag))
 		|| ((pSession->res1 == 0)
 			&& (HTTP_TRANSFER_INIT == pSession->transfer_flag) 
-			&& (NULL == pSession->response_head) ))     // TODO: bug. Content-Lengthè¢«åˆ†åˆ°ä¸¤ä¸ªåŒ…ä¸­
+			&& (NULL == pSession->response_head)))
 	{
 		pSession->response_head = (char*)calloc(1, contentlen+1);
 		memcpy(pSession->response_head, content, contentlen);
@@ -754,7 +800,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+			{
+				++g_nCountWholeContentFull;
+				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
@@ -765,11 +814,13 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 
 			if (HTTP_CONTENT_NONE == pSession->content_type)
 			{
-				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE and HTTP_CONTENT_NONE; content is %s\n%s", nIndex, pSession->request_head, content);
+				LOGWARN("Session[%d] is content-type unknown; content is \n%s\n%s", 
+						 nIndex, pSession->request_head, content);
 			}
 			else
 			{
-				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE but not HTTP_CONTENT_NONE; content is %s\n%s", nIndex, pSession->request_head, content);
+				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE but not HTTP_CONTENT_NONE; content is \n%s\n%s", 
+						 nIndex, pSession->request_head, content);
 			}
 			
 			if (!bIsCurPack)
@@ -777,7 +828,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+			{
+				++g_nCountWholeContentFull;
+				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
@@ -794,7 +848,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+			{
+				++g_nCountWholeContentFull;
+				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
@@ -810,7 +867,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+			{
+				++g_nCountWholeContentFull;
+				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
@@ -840,7 +900,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				
 				pSession->flag = HTTP_SESSION_FINISH;
 				if (push_queue(_whole_content, pSession) < 0)
-					LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+				{
+					++g_nCountWholeContentFull;
+					LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+				}
 				
 				return HTTP_APPEND_FINISH_CURRENT;
 			}
@@ -867,12 +930,12 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	if ((pSession->seq+pSession->res0) != tcphead->seq || pSession->ack != tcphead->ack_seq) 
 	{
 		LOGWARN("Session[%d] C->S packet wrong order. pre.seq=%u pre.ack=%u "
-				 "pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", nIndex,
-				 pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				"pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
+				 nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 
 		if ((1 == contentlen) && (*content == '\0'))
 		{
-			LOGWARN("Session[%d] AppendClientToServer drop packet, wrong order, contentlen=1, content=empty!", nIndex);
+			LOGWARN("Session[%d] AppendClientToServer drop packet, wrong order, contentlen=1, content=empty!",  nIndex);
 		}
 		else
 		{
@@ -957,7 +1020,10 @@ int AppendLaterPacket(int nIndex)
 				case HTTP_APPEND_FINISH_LATER:
 					pSession->flag = HTTP_SESSION_FINISH;
 					if (push_queue(_whole_content, pSession) < 0)
-						LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
+					{
+						++g_nCountWholeContentFull;
+						LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+					}
 					
 					break;
 				default:
@@ -996,7 +1062,8 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		// process timeout
 		if (tv->tv_sec-pREQ->update > g_nHttpTimeout) 
 		{
-			LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
+			++g_nTimeOutCount;
+			LOGWARN("One http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
 			LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
 			CleanHttpSession(pREQ);
 			continue;
@@ -1061,7 +1128,7 @@ void *HTTP_Thread(void* param)
 		
 		const char* packet = pop_queue(_packets);
 		if (packet == NULL) {
-			sleep(0);
+			usleep(50000);
 			continue;
 		}
 
@@ -1092,19 +1159,21 @@ void *HTTP_Thread(void* param)
 			{
 				if (nRes == -3) 
 				{
-					LOGINFO("Content is not html data. drop count = %d", ++g_nDropCountForImage);
+					++g_nDropCountForImage;
+					LOGINFO("Content is not html data. drop count = %d", g_nDropCountForImage);
 				}
 				else if (nRes == -1) 
 				{
-					LOGWARN0("Content is error! Do not insert into session.");
+					LOGWARN0("Request content is error! Do not insert into session.");
 				} 
 				else if (nRes == -2) 
 				{
 					char *enter = strchr(content, '\r');
 					if (enter != NULL) 
 					{
+						++g_nDropCountForSessionFull;
 						*enter = '\0';
-						LOGWARN("_http_session is full. drop count = %d, drop content = %s", ++g_nDropCountForSessionFull, content);
+						LOGWARN("_http_session is full. drop count = %d, drop content = %s", g_nDropCountForSessionFull, content);
 						*enter = '\r';
 
 						LOGWARN("Current Send status: g_nFlagGetData = %d, g_nFlagSendData = %d", g_nFlagGetData, g_nFlagSendData);
@@ -1133,6 +1202,8 @@ int HttpInit()
 	ASSERT(_packets == NULL);
 	ASSERT(_http_session == NULL);
 
+	LoadHttpConf(CONFIG_PATH);
+	
 	char szSendErrStateDataFlag[10] = {0};
 	if (GetValue(CONFIG_PATH, "SendErrStateDataFlag", szSendErrStateDataFlag, 2) != NULL)
 		g_nSendErrStateDataFlag = atoi(szSendErrStateDataFlag);
@@ -1253,7 +1324,8 @@ int PushHttpPack(const char* buffer, const struct iphdr* iphead, const struct tc
 	int err = push_queue(_packets, (const void*) buffer);
 	if (err < 0) 
 	{
-		LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
+		++g_nDropCountForPacketFull;
+		LOGWARN("http_queue is full. drop the packets, drop count = %d", g_nDropCountForPacketFull);
 	}
 	return err;
 }
@@ -1290,16 +1362,6 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 		if (nPackSize > g_nMaxUsedPackSize)
 		{
 			g_nMaxUsedPackSize = nPackSize;
-		}
-		
-		if (0 == _push_pack_last_time)
-		{
-			_push_pack_last_time = time(NULL);
-		}
-		else if (time(NULL) - _push_pack_last_time > LOG_INFO_INTERVAL)
-		{
-			LOGINFO("********* Current Pushed Pack Count = %llu , Max Used Pack Buffer Size = %d ! *********", g_nPushedPackCount, g_nMaxUsedPackSize);	
-			_push_pack_last_time = time(NULL);
 		}
 	}
 
@@ -1355,7 +1417,7 @@ int LoadHttpConf(const char* filename)
 		for(left=httphosts; ;left=NULL) {
 			ipport = strtok_r(left, "\n", &right);
 			if (ipport==NULL) break;
-			LOGINFO("monitor host %s", ipport);
+			LOGFIX("monitor host %s", ipport);
 			if (str_ipp(ipport, &_monitor_hosts[n])) { ++n; }
 		}
 	}
@@ -1372,7 +1434,7 @@ int LoadHttpConf(const char* filename)
 		for(left=excludehosts; ;left=NULL) {
 			ipport = strtok_r(left, "\n", &right);
 			if (ipport==NULL) break;
-			LOGINFO("exclude host %s", ipport);
+			LOGFIX("exclude host %s", ipport);
 			if (str_ipp(ipport, &_exclude_hosts[n])) { ++n; }
 		}
 	}
@@ -1398,7 +1460,7 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 	{
 		if (nDataLen > plain_len)
 		{
-			LOGWARN0("TransGzipData, content length > plain length, trans stop!");
+			LOGWARN("TransGzipData, content length(%d) > plain length(%d), trans stop!", nDataLen, plain_len);
 			return -1;
 		}
 		
@@ -1413,18 +1475,18 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 		}
 		else
 		{
-			LOGWARN0("TransGzipData, plain length = 0 and plain length >= 800KB, trans stop!");
+			LOGWARN("TransGzipData, plain length = 0 and content length(%d) >= 800KB, trans stop!", nDataLen);
 			return -1;
 		}
 	}
 	else
 	{
-		LOGWARN0("TransGzipData, plain length < 0 or plain length >= 10M, trans stop!");
+		LOGWARN("TransGzipData, plain length(%d) < 0 or plain length >= 10M, trans stop!", plain_len);
 		return -1;
 	}
 	
 	if (pPlain == NULL) {
-		LOGWARN0("cannt calloc plain!");
+		LOGWARN0("Can not calloc plain!");
 		return -1;
 	}
 
@@ -1459,12 +1521,12 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 		while (!gzeof(p)) {
 			n = gzread(p, pPlain+nReaded, plain_len+1024-nReaded);
 			if (n == -1) {
-				LOGERROR("gzread() return -1. %s", strerror(errno));
+				LOGWARN("gzread() return -1. %s", strerror(errno));
 				break;
 			}
 			nReaded += n;
 			if (nReaded > plain_len) {
-				LOGERROR("gzread() return more than plain_len, read data length = %d, plain length = %d", nReaded, plain_len);
+				LOGWARN("gzread() return more than plain_len, read data length = %d, plain length = %d", nReaded, plain_len);
 				break;
 			}
 		}
@@ -1475,7 +1537,7 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 			n = gzread(p, pPlain+nReaded, 5120);
 			LOGDEBUG("gzread() return %d", n);
 			if (n == -1) {
-				LOGERROR("gzread() return -1. %s", strerror(errno));
+				LOGWARN("gzread() return -1. %s", strerror(errno));
 				break;
 			}
 			nReaded += n;
@@ -1515,7 +1577,7 @@ int GetHttpData(char **data)
 	} while (packet!=NULL);
 
 	g_nHttpLen += http_len;
-	LOGINFO("********* Current http data len = %llu Bytes! *********", g_nHttpLen);
+	LOGINFO("Current http data len = %llu Bytes!", g_nHttpLen);
 
 	int nPortOffsite = 0;
 	int bIsConfigPort = IsConfigPort(&pSession->server);
@@ -1559,7 +1621,11 @@ int GetHttpData(char **data)
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 		if (contentlen > RECV_BUFFER_LEN) {
-			LOGERROR("contentlen[%u] is great than RECV_BUFFER_LEN[%u]", contentlen, RECV_BUFFER_LEN);
+			LOGERROR("Contentlen[%u] of packet is great than RECV_BUFFER_LEN[%u]", contentlen, RECV_BUFFER_LEN);
+			pSession->data = packet;
+			CleanHttpSession(pSession);
+			free(http_content);
+			return 0;
 		}
 		const char *content = (void*)tcphead + tcphead->doff*4;
 		memcpy(http_content+pos, content, contentlen);
@@ -1608,21 +1674,26 @@ int GetHttpData(char **data)
 		LOGERROR("No GET or POST. %c%c%c%c", HTTP[0],HTTP[1],HTTP[2],HTTP[3]);
 	}
 
-	if (HTTP == NULL) {
-		LOGWARN("Not http!!!!! cannt get here!!!. g_nContentErrorCount = %d, g_nHttpNullCount = %d", ++g_nContentErrorCount, ++g_nHttpNullCount);
+	if (HTTP == NULL) 
+	{
+		++g_nContentErrorCount;
+		++g_nHttpNullCount;
+		LOGWARN("Fail to find http content! g_nContentErrorCount = %d, g_nHttpNullCount = %d", g_nContentErrorCount, g_nHttpNullCount);
 		CleanHttpSession(pSession);
 		free(http_content);
 		return 0;
 	}
 
 	if ((HTTP - http_content) >= data_len) {
-		LOGWARN("Session[%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->index, HTTP_PRE, ++g_nContentErrorCount, ++g_nDatalenErrorCount);
+		++g_nContentErrorCount;
+		++g_nDatalenErrorCount;
+		LOGWARN("Session[%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->index, HTTP_PRE, g_nContentErrorCount, g_nDatalenErrorCount);
 		CleanHttpSession(pSession);
 		free(http_content);
 		return 0;
 	}
 	
-	LOGDEBUG("Session[%d] ready to get data", pSession->index);
+	LOGDEBUG("Session[%d] ready to get data.", pSession->index);
 	if ((pSession->content_type != HTTP_CONTENT_NONE)
 		|| (HTTP_TRANSFER_WITH_HTML_END == transfer_flag))
 	{
@@ -1633,7 +1704,9 @@ int GetHttpData(char **data)
 		
 		if (NULL == http_code)
 		{
-			LOGWARN("Session[%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->index, HTTP_PRE, ++g_nContentErrorCount, ++g_nHttpcodeErrorCount);
+			++g_nContentErrorCount;
+			++g_nHttpcodeErrorCount;
+			LOGWARN("Session[%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->index, HTTP_PRE, g_nContentErrorCount, g_nHttpcodeErrorCount);
 			CleanHttpSession(pSession);
 			free(http_content);
 			return 0;
@@ -1658,7 +1731,7 @@ int GetHttpData(char **data)
 			char* pOldContent = strstr(HTTP, "\r\n\r\n");
 			if (pOldContent == NULL)
 			{
-				LOGWARN("Session[%d] has not content_TRANSFER_CHUNKED, Current content= %s", pSession->index, HTTP_PRE);
+				LOGWARN("Session[%d] with flag(HTTP_TRANSFER_CHUNKED) has not content, Current content= %s", pSession->index, HTTP_PRE);
 				goto NOZIP;
 			}
 			pOldContent += 4;
@@ -1694,7 +1767,7 @@ int GetHttpData(char **data)
 				}
 				else
 				{
-					LOGWARN("Session[%d] get chunk size <0 nChunkLen=%d", pSession->index, nChunkLen);
+					LOGWARN("Session[%d] get chunk size < 0 nChunkLen=%d", pSession->index, nChunkLen);
 					nContentLength = 0;
 					break;
 				}
@@ -1744,7 +1817,7 @@ int GetHttpData(char **data)
 			char* pTmpContent = strstr(HTTP, "\r\n\r\n");
 			if (pTmpContent == NULL)
 			{
-				LOGWARN("Session[%d] has not content_HTML_END, current content = %s", pSession->index, HTTP_PRE);
+				LOGWARN("Session[%d] with flag(HTTP_TRANSFER_WITH_HTML_END) has not content, current content = %s", pSession->index, HTTP_PRE);
 				goto NOZIP;
 			}
 			pTmpContent += 4;
@@ -1773,7 +1846,7 @@ int GetHttpData(char **data)
 			char* pOldContent = strstr(HTTP, "\r\n\r\n");
 			if (pOldContent == NULL)
 			{
-				LOGWARN("Session[%d] has not content_TRANSFER_FILE, current content = %s", pSession->index, HTTP_PRE);
+				LOGWARN("Session[%d] with flag(HTTP_TRANSFER_FILE) has not content, current content = %s", pSession->index, HTTP_PRE);
 				goto NOZIP;
 			}
 			pOldContent += 4;
@@ -1821,13 +1894,14 @@ int GetHttpData(char **data)
 		}
 		content += 4;
 
-		LOGDEBUG("Session[%d] get data content_encoding_gzip=%d", pSession->index, pSession->content_encoding_gzip);
+		LOGDEBUG("Session[%d] content_encoding_gzip flag = %d", pSession->index, pSession->content_encoding_gzip);
 		
 		// gzip Content-Encoding: gzip
 		if (1 == pSession->content_encoding_gzip) 
 		{
 			const char* pZip_data = content;
 			char* pPlain = NULL;
+			++g_nGzipCount;
 			int nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain);
 			if (nUnzipLen != -1)
 			{
@@ -1852,6 +1926,12 @@ int GetHttpData(char **data)
 					goto NOZIP;
 				}
 			}
+			else
+			{
+				++g_nUnGzipFailCount;
+				LOGWARN("Session[%d] fail to UnGzip! Gzip Session count=%d, UnGzip fail count=%d", pSession->index, g_nGzipCount, g_nUnGzipFailCount);
+				
+			}
 		}
 NOZIP:
 		CleanHttpSession(pSession);
@@ -1863,7 +1943,9 @@ NOZIP:
 	else
 	{
 		//LOGDEBUG("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
-		LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->index, ++g_nContentErrorCount, ++g_nContentUnknownCount);
+		++g_nContentErrorCount;
+		++g_nContentUnknownCount;
+		LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->index, g_nContentErrorCount, g_nContentUnknownCount);
 		LOGINFO("Session[%d] content is %s", pSession->index, HTTP_PRE);
 	}
 		

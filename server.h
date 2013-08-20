@@ -37,5 +37,19 @@ int InitServer();
 int StartServer();
 void StopServer();
 
+int SetupTCPServer(int server_port);
+int Unblock(int sock);
+int WriteSocketData(int sock, const void *pBuffer, int nWriteSize);
+int ReadSocketData(int sock, char *pBuffer, int nReadSize);
+int RecvData(int sock, struct msg_head *pMsgHead, char **pData);
+int SendData(int sock, unsigned char msg_type, const void *pData, unsigned int data_length);
+int ProcessReqGetIpList();
+int ProcessReqSetIpList(const char *pRecvData);
+int ProcessClientSockRes();
+int ProcessClientSockReq();
+int ProcessClientCfgSockReq();
+int ProcessServerSockReq();
+int LocalCacheFile();
+
 #endif
 

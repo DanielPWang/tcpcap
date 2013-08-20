@@ -24,15 +24,15 @@
 
 int SockManager;
 extern int SockMonitor[MONITOR_COUNT];
-size_t MemorySize;
 volatile int Living = 1;
 volatile int NeedReloadConfig = 0;
+int _net_flow_func_on = 0;
 
-extern uint64_t g_CapCount;
-extern uint64_t g_CapSize;
-extern uint32_t g_nCapFisrtTime;
-extern uint32_t g_nCapLastTime;
-
+uint64_t g_nCapCount = 0;
+uint64_t g_nCapSize = 0;
+uint32_t g_nCapFisrtTime = 0;
+uint32_t g_nCapLastTime = 0;
+extern uint64_t g_nSkippedPackCount;
 
 const char *MonitorFilter;
 const char* CONFIG_PATH;
@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
 	strcat(dirname(conf_file), CONFIG_PATH_FILE);
 	CONFIG_PATH = conf_file;
 
-	// log
+	// init log
 	{
 		char* tmp = calloc(1,1024);
 		ASSERT(tmp!=NULL);
@@ -120,19 +120,31 @@ int main(int argc, char* argv[])
 		open_log(logfile, nlevel);
 		free(tmp);
 	}
+
+	LOGFIX0("Start eru_agent...");
+		
 	// open monitordev
-	if (OpenMonitorDevs() == 0) {
-		LOGFATAL("%s", "Can Open any monitor.");
+	if (OpenMonitorDevs() == 0) 
+	{
+		printf("Can Open any monitor!");
+		LOGFATAL0("Can Open any monitor!");
 		return 0;
 	}
 	// start server
 	int nerr = StartServer();
 	ASSERT(nerr == 0);
-	// init protocol_proce
-	LoadHttpConf(CONFIG_PATH);
+
+	// init protocol_proc
 	HttpInit();
 
-	FlowInit();
+	// init net flow proc
+	char szNetFlowFunc[10] = {0};
+	GetValue(CONFIG_PATH, "net_flow_func", szNetFlowFunc, 6);
+	if (strcmp(szNetFlowFunc, "true") == 0)
+		_net_flow_func_on = 1;
+
+	if (_net_flow_func_on)
+		FlowInit();
 
 	// capture and process
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);
@@ -140,7 +152,7 @@ int main(int argc, char* argv[])
 	
 	while (Living) 
 	{
-		buffer = calloc(1, RECV_BUFFER_LEN); // GetBuffer(shmptr);
+		buffer = calloc(1, RECV_BUFFER_LEN);
 		if (buffer == NULL)
 		{
 			sleep(1);
@@ -153,8 +165,8 @@ int main(int argc, char* argv[])
 			if (nrecv == 0) 
 				continue;
 
-			++g_CapCount;
-			g_CapSize += nrecv;
+			++g_nCapCount;
+			g_nCapSize += nrecv;
 			
 			if (0 == g_nCapFisrtTime)
 				g_nCapFisrtTime = time(NULL);
@@ -166,7 +178,6 @@ int main(int argc, char* argv[])
 			u_short eth_type = ntohs(ehead->ether_type);
 			if (ETHERTYPE_VLAN == eth_type)
 			{
-			
 				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
 				//LOGDEBUG("vlan packet, eth_type = %x", eth_type);
 				//fprintf(stderr, "vlan packet, eth_type = %x \n", eth_type);
@@ -187,7 +198,9 @@ int main(int argc, char* argv[])
 				*/
 				
 				// Flow filter
-				FilterPacketForFlow(iphead);
+				if (_net_flow_func_on)
+					FilterPacketForFlow(iphead);
+
 				if (iphead->protocol == IPPROTO_TCP)
 				{
 					struct tcphdr *tcphead = TCPHDR(iphead);
@@ -196,15 +209,23 @@ int main(int argc, char* argv[])
 					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
 						break;
 				}
+				else
+				{
+					g_nSkippedPackCount++;
+				}
+			}
+			else
+			{
+				g_nSkippedPackCount++;
 			}
 			memset(buffer, 0, RECV_BUFFER_LEN);
 		} 
 		while (Living);
 	}
-	ShowLastLogInfo();
-	LOGINFO0("ready to exit...");
+	ShowOpLogInfo(1);
+	LOGFIX0("Ready to exit...");
 	StopServer();
-	LOGINFO0("exit server...");
+	LOGFIX0("Exit eru_agent...");
 	close_log();
 	return 0;
 }

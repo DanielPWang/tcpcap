@@ -2,8 +2,8 @@
 #define __DEFINE_H__
 
 #define VER_MAJOR 1
-#define VER_MINOR 0
-#define VER_PATCH 12
+#define VER_MINOR 1
+#define VER_PATCH 0
 
 #define MONITOR_COUNT 5
 
@@ -15,7 +15,7 @@
 extern const char* CONFIG_PATH;
 
 // capture
-#define RECV_BUFFER_LEN   4000 // 8192
+#define RECV_BUFFER_LEN   4096 // 8192
 
 // HTTP
 #define MAX_HTTP_SESSIONS 6000
@@ -34,8 +34,7 @@ extern const char* CONFIG_PATH;
 #define MAX_FLOW_RESPONSE_CLIENT  500
 #define FLOW_SEND_INTERVAL_TIME   60
 
-#define LOG_INFO_INTERVAL   3
-
+#define LOG_OP_INTERVAL   300
 
 // server
 #define SERVER_PORT 2012

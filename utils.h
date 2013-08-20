@@ -18,7 +18,7 @@ int split_line( char* line, char** left, char** right, const char delim);
  */
 char* strtrim(char* str, const char* ignore);
 
-enum LOG_LEVEL { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
+enum LOG_LEVEL { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL, LOG_FIX };
 
 /** @brief success return 0 **/
 int open_log(const char* logfile, int level);
@@ -46,6 +46,9 @@ void close_log();
 #define LOGFATAL0(msg) \
 	do{ if(loglevel()<=LOG_FATAL) logmsg(LOG_FATAL, "[%s:%d] %s", __FILE__, __LINE__, msg); } while (0)
 
+#define LOGFIX0(msg) \
+	do{ if(loglevel()<=LOG_FIX) logmsg(LOG_FIX, "[%s:%d] %s", __FILE__, __LINE__, msg); } while (0)
+
 #define LOGTRACE(fmt, ...) \
 	do{ if(loglevel()<=LOG_TRACE) logmsg(LOG_TRACE, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__); } while (0)
 
@@ -63,6 +66,9 @@ void close_log();
 
 #define LOGFATAL(fmt, ...) \
 	do{ if(loglevel()<=LOG_FATAL) logmsg(LOG_FATAL, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__); } while (0)
+
+#define LOGFIX(fmt, ...) \
+	do{ if(loglevel()<=LOG_FIX) logmsg(LOG_FIX, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__); } while (0)
 
 void print_bt();
 
