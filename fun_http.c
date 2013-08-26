@@ -306,8 +306,20 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 			free(pSession->response_head);
 			pSession->response_head = NULL;
 		}
+
+		if (pSession->cur_content!=NULL)
+		{
+			free(pSession->cur_content);
+			pSession->cur_content = NULL;
+		}
 		
-		LOGDEBUG("Session[%d] clean response_head successfully!", pSession->index);
+		if (pSession->part_content!=NULL)
+		{
+			free(pSession->part_content);
+			pSession->part_content = NULL;
+		}
+		
+		LOGDEBUG("Session[%d] clean request_head,response_head, cur_content and part_content successfully!", pSession->index);
 		
 		memset(pSession, 0, sizeof(*pSession));
 		pSession->index = index;
@@ -454,6 +466,10 @@ int NewHttpSession(const char* packet)
 	pIDL->response_head = NULL;
 	pIDL->response_head_gen_time = 0;
 	pIDL->response_head_len = 0;
+	pIDL->part_content = NULL;
+	pIDL->part_content_len = 0;
+	pIDL->cur_content = NULL;
+	pIDL->cur_content_len = 0;
 	pIDL->request_head_len_valid_flag = 0;
 	*(const char**)packet = NULL;
 	if (*(unsigned*)content==_get_image && content[contentlen-4]=='\r'
@@ -577,10 +593,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	}
 	else
 	{
-		//LOGDEBUG("Session[%d] S->C packet. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u content= %s", //ljr
-		//		nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, content);
 		LOGDEBUG("Session[%d] S->C packet. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-				nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 	}
 	
 	pSession->flag = HTTP_SESSION_REPONSEING;
@@ -594,11 +608,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	*(const char**)pSession->lastdata = pPacket;
 	pSession->lastdata = (void*)pPacket;
 
-	// reponse length
-	if (((*(unsigned*)content == _http_image) && (HTTP_TRANSFER_INIT == pSession->transfer_flag))
-		|| ((pSession->res1 == 0)
+	// Process the response of the head
+	if ((*(unsigned*)content == _http_image) 
 			&& (HTTP_TRANSFER_INIT == pSession->transfer_flag) 
-			&& (NULL == pSession->response_head)))
+			&& (NULL == pSession->response_head))
 	{
 		pSession->response_head = (char*)calloc(1, contentlen+1);
 		memcpy(pSession->response_head, content, contentlen);
@@ -649,7 +662,40 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			LOGTRACE("Session[%d] part_reponse_len = %u/%u", nIndex, pSession->res2, pSession->res1);
 		}
 	}
-		
+
+	// Process the part content of response
+	if (pSession->part_content != NULL)
+	{
+		free(pSession->part_content);
+		pSession->part_content = NULL;
+	}
+
+	if (pSession->cur_content != NULL)
+	{
+		int nPartContentLen = pSession->cur_content_len + contentlen;
+		pSession->part_content = (char*)calloc(1, nPartContentLen+1);
+		pSession->part_content_len = nPartContentLen;
+		memcpy(pSession->part_content, pSession->cur_content, pSession->cur_content_len);
+		memcpy(pSession->part_content+pSession->cur_content_len, content, contentlen);
+
+		free(pSession->cur_content);
+		pSession->cur_content = NULL;
+	}
+	else
+	{
+		pSession->part_content = (char*)calloc(1, contentlen+1);
+		pSession->part_content_len = contentlen;
+		memcpy(pSession->part_content, content, contentlen);
+	}
+
+	if (contentlen > 0)
+	{
+		pSession->cur_content = (char*)calloc(1, contentlen+1);
+		pSession->cur_content_len = contentlen;
+		memcpy(pSession->cur_content, content, contentlen);
+	}
+
+	// Process the reponse head content
 	if (1 == pSession->response_head_recv_flag)
 	{
 		pSession->response_head_recv_flag = 0;
@@ -836,7 +882,13 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
 	}
-
+	else
+	{
+		content = pSession->part_content;
+		contentlen = pSession->part_content_len;
+		strlwr(content);
+	}
+	
 	if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == pSession->transfer_flag)
 //		|| HTTP_TRANSFER_NONE == pSession->transfer_flag)
 	{
@@ -878,13 +930,6 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	else if (HTTP_TRANSFER_WITH_HTML_END == pSession->transfer_flag)
 	{
 		char *pszHtmlEnd = memmem(content, contentlen, "</html>", 7);
-		if (pszHtmlEnd == NULL)
-		{
-			pszHtmlEnd = memmem(content, contentlen, "</Html>", 7);
-			if (pszHtmlEnd == NULL)
-				pszHtmlEnd = memmem(content, contentlen, "</HTML>", 7);
-		}
-		
 		if (pszHtmlEnd != NULL)
 		{
 			LOGDEBUG("Session[%d] find </html>, content=%s", nIndex, content);

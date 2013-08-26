@@ -31,6 +31,8 @@ struct tcp_session
 	unsigned request_head_len_valid_flag;
 	unsigned response_head_len;
 	unsigned response_head_gen_time;
+	unsigned cur_content_len;
+	unsigned part_content_len;
 	struct timeval create;	// first
 	time_t update;		// the lasttime update.
 	void *data;
@@ -39,6 +41,8 @@ struct tcp_session
 	void *last_pack_later;
 	char *request_head;
 	char *response_head;
+	char *cur_content;
+	char *part_content;
 };
 
 /** @brief tans "10.10.100.10:9900" to host_t 
