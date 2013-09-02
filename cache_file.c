@@ -196,6 +196,7 @@ int GetNewCacheFileName(char* pszFileName)
                      FileFilter,
                      alphasort);
 
+	int nRs = 0;
 	int nNum = 1;
 	char szCurDate[11] = {0};
 	time_t now = time(NULL);
@@ -234,9 +235,12 @@ int GetNewCacheFileName(char* pszFileName)
 		free(pDent);
     }
 
-	sprintf(pszFileName, "acf_%s_%d.cache", szCurDate, nNum);
+	if (nNum > 999)
+		nRs = -1;
+	else
+		sprintf(pszFileName, "acf_%s_%03d.cache", szCurDate, nNum);
 	
-	return 0;
+	return nRs;
 }
 
 int CreateNewCacheFile(CacheFileDef* pCacheFile)
@@ -249,33 +253,40 @@ int CreateNewCacheFile(CacheFileDef* pCacheFile)
 		if (mkdir(CACHE_FILE_FOLDER, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0)
 			nRs = -1;
 	
-	if ((0 == nRs) && (GetNewCacheFileName(pCacheFile->szFileName) == 0))
+	if (0 == nRs)
 	{
-		char szPathFile[512] = {0};
-		sprintf(szPathFile, "%s%s", CACHE_FILE_FOLDER, pCacheFile->szFileName);
-		pCacheFile->pFile = fopen(szPathFile, "wb");
-		if (NULL == pCacheFile->pFile) 
+		if (GetNewCacheFileName(pCacheFile->szFileName) == 0)
 		{
-			CleanCacheFile(pCacheFile, 0);
-			nRs = -2;
+			char szPathFile[512] = {0};
+			sprintf(szPathFile, "%s%s", CACHE_FILE_FOLDER, pCacheFile->szFileName);
+			pCacheFile->pFile = fopen(szPathFile, "wb");
+			if (NULL == pCacheFile->pFile) 
+			{
+				CleanCacheFile(pCacheFile, 0);
+				nRs = -2;
+			}
+			else
+			{
+				char szFlag[4] = "acf";
+				char szVersion[5] = "v1.0";
+				int nReadCount = 0;
+				int nWriteCount = 0;
+				uint64_t nOffset = 0;	
+				strcpy(pCacheFile->szVersion, "v1.0");
+				pCacheFile->nFileSize = FILE_HEAD_LEN;
+				nRs = -3;
+				if (fwrite(szFlag, sizeof(char), 3, pCacheFile->pFile) == 3)
+					if (fwrite(szVersion, sizeof(char), 4, pCacheFile->pFile) == 4)
+						if (fwrite(&nWriteCount, sizeof(int), 1, pCacheFile->pFile) == 1)
+							if (fwrite(&nReadCount, sizeof(int), 1, pCacheFile->pFile) == 1)
+								if (fwrite(&nOffset, sizeof(uint64_t), 1, pCacheFile->pFile) == 1)
+									if (fwrite(&nOffset, sizeof(uint64_t), 1, pCacheFile->pFile) == 1)
+										nRs = 0;					
+			}
 		}
 		else
 		{
-			char szFlag[4] = "acf";
-			char szVersion[5] = "v1.0";
-			int nReadCount = 0;
-			int nWriteCount = 0;
-			uint64_t nOffset = 0;	
-			strcpy(pCacheFile->szVersion, "v1.0");
-			pCacheFile->nFileSize = FILE_HEAD_LEN;
-			nRs = -3;
-			if (fwrite(szFlag, sizeof(char), 3, pCacheFile->pFile) == 3)
-				if (fwrite(szVersion, sizeof(char), 4, pCacheFile->pFile) == 4)
-					if (fwrite(&nWriteCount, sizeof(int), 1, pCacheFile->pFile) == 1)
-						if (fwrite(&nReadCount, sizeof(int), 1, pCacheFile->pFile) == 1)
-							if (fwrite(&nOffset, sizeof(uint64_t), 1, pCacheFile->pFile) == 1)
-								if (fwrite(&nOffset, sizeof(uint64_t), 1, pCacheFile->pFile) == 1)
-									nRs = 0;					
+			nRs = -4;
 		}
 	}
 	

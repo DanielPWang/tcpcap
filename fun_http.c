@@ -146,9 +146,13 @@ void ShowOpLogInfo(int bIsPrintScreen)
 	{
 		nIntervalCostTime = g_nCapLastTime - nPreCapTime;
 	}
-	uint64_t nFlow = g_nCapSize / nIntervalCostTime;
-	nFlow = (nFlow*8) / (1024*1024);
-		
+	uint64_t nFlow = 0;
+	if (nIntervalCostTime != 0)
+	{
+		nFlow = g_nCapSize / nIntervalCostTime;
+		nFlow = (nFlow*8) / (1024*1024);
+	}
+	
 	LOGFIX("\n \
 		共抓取%llu个包[%llu字节] \n \
 		背景流量%llu Mbps[当前%u秒] \n \

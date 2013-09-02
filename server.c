@@ -35,7 +35,6 @@ extern int _net_flow_func_on;
 
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
-static struct msg_head _msg_heart_hit = {0};
 static time_t _active = 0;
 static time_t _op_log_time = 0;
 
@@ -114,7 +113,7 @@ int WriteSocketData(int sock, const void *pBuffer, int nWriteSize)
 			{
 				if (++nRepeatForFD >= 10000)
 				{
-					LOGWARN0("Total time of FD_ISSET=0 is more than 5 minutes!");
+					LOGWARN0("Total time of FD_ISSET=0 is more than 100 seconds!");
 					return -1;
 				}
 			}
@@ -127,7 +126,7 @@ int WriteSocketData(int sock, const void *pBuffer, int nWriteSize)
 		{
 			if (++nRepeatForSel >= 10000)
 			{
-				LOGWARN0("Total time of selecting timeout is more than 5 minutes!");
+				LOGWARN0("Total time of selecting timeout is more than 100 seconds!");
 				return -1;
 			}
 		}
@@ -194,7 +193,7 @@ int ReadSocketData(int sock, char *pBuffer, int nReadSize)
 			{
 				if (++nRepeatForFD >= 10000)
 				{
-					LOGWARN0("Total time of FD_ISSET=0 is more than 5 minutes!");
+					LOGWARN0("Total time of FD_ISSET=0 is more than 100 seconds!");
 					return -1;
 				}
 			}
@@ -207,7 +206,7 @@ int ReadSocketData(int sock, char *pBuffer, int nReadSize)
 		{
 			if (++nRepeatForSel >= 10000)
 			{
-				LOGWARN0("Total time of selecting timeout is more than 5 minutes!");
+				LOGWARN0("Total time of selecting timeout is more than 100 seconds!");
 				return -1;
 			}
 		}
@@ -1086,12 +1085,14 @@ int LocalCacheFile()
 	return nRs;
 }
 
+void CloseCacheFile()
+{
+	CleanCacheFile(&g_fileWriter, 0);
+	CleanCacheFile(&g_fileReader, 0);
+}
+
 int StartServer()
 {
-	_msg_heart_hit.version = MSG_NORMAL_VER;
-	_msg_heart_hit.type = MSG_TYPE_HEARTHIT;
-	_msg_heart_hit.length = htonl(0);
-
 	char szCacheDays[10] = {0};
 	GetValue(CONFIG_PATH, "cache_days", szCacheDays, 3);
 	if (strlen(szCacheDays) != 0)
@@ -1106,13 +1107,16 @@ int StartServer()
 	GetValue(CONFIG_PATH, "cache_file_size", szCacheFileSize, 6);
 	if (strlen(szCacheFileSize) != 0)
 	{
-		nCacheFileSize = atoi(szCacheFileSize);
-		if (nCacheFileSize >= 1 && nCacheFileSize <= 10240)
+		int nTmpSize = atoi(szCacheFileSize);
+		if (nTmpSize >= 1 && nTmpSize <= 10240)
+		{
+			nCacheFileSize = nTmpSize;
 			SetCacheFileSize(nCacheFileSize);
+		}
 	}
 
 	printf("cache_full_day = %d\n", g_nCacheDays);
-	printf("cache_file_size = %d\n", nCacheFileSize);
+	printf("cache_file_size = %d MB\n", nCacheFileSize);
 		
 	int nerr = pthread_create(&_srv_thread, NULL, server_thread, NULL);
 	return nerr;

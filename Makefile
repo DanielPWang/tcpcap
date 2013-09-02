@@ -8,6 +8,7 @@ else
 	CFLAGS = -ggdb -O0 
 endif
 
+CFLAGS += -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 
 CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99
 	
 LINKFLAGS = -Wl,-rpath,. -rdynamic

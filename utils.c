@@ -72,7 +72,7 @@ int exist_file(const char* path)
 /////////// LOG
 static char *_logfile = NULL;
 static FILE *_logfd = NULL;
-static size_t LOG_LENGTH_MAX = 128 * 1024 * 1024;
+static size_t LOG_LENGTH_MAX = 512 * 1024 * 1024;
 static pthread_mutex_t _loglock = PTHREAD_MUTEX_INITIALIZER;
 static int _level = 0;
 

@@ -50,6 +50,7 @@ int ProcessClientSockReq();
 int ProcessClientCfgSockReq();
 int ProcessServerSockReq();
 int LocalCacheFile();
+void CloseCacheFile();
 
 #endif
 

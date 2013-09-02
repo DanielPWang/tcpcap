@@ -225,6 +225,7 @@ int main(int argc, char* argv[])
 	ShowOpLogInfo(1);
 	LOGFIX0("Ready to exit...");
 	StopServer();
+	CloseCacheFile();
 	LOGFIX0("Exit eru_agent...");
 	close_log();
 	return 0;
