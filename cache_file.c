@@ -20,7 +20,8 @@ void SetCacheFileSize(int nSize)
 
 int IsCacheFullDays(int nFullDays)
 {
-	assert(nFullDays > 0);
+	if (0 == nFullDays)
+		return 1;
 	
 	struct dirent** pDent;
 	int nCount = 0;
@@ -30,11 +31,11 @@ int IsCacheFullDays(int nFullDays)
                      alphasort);
 
 	char szDate[11] = {0};
+	char szLatestDate[11] = {0};
 	int nDays = 0;
 	if (nCount > 0)
     {
-    	char szLatestDate[11] = {0};
-    	for (int i = nCount-1; i >= 0; i--)
+    	for (int i = 0; i < nCount; i++)
 		{
 			char* pszLatestFileName = strdup(pDent[i]->d_name);
 			if (strncmp(pszLatestFileName, "acf", 3) == 0)
@@ -56,8 +57,23 @@ int IsCacheFullDays(int nFullDays)
 		}
 		free(pDent);
     }
-	
-	return (nDays > nFullDays);
+
+	int nIsFull = 0;
+	if (nDays > nFullDays)
+		nIsFull = 1;
+	else if (nDays == nFullDays)
+	{
+		char szCurDate[11] = {0};
+		time_t now = time(NULL);
+		struct tm t;
+		strftime(szCurDate, sizeof(szCurDate), "%Y-%m-%d", localtime_r(&now, &t));
+		if (strcmp(szCurDate, szLatestDate) != 0)
+		{
+			nIsFull = 1;	
+		}
+	}
+
+	return nIsFull;
 }
 
 int IsReadEnd(CacheFileDef* pCacheFile)
