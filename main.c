@@ -39,7 +39,6 @@ const char* CONFIG_PATH;
 
 void sig_int(int signo)
 {
-	LOGINFO0("Recv signal to exit...");
 	Living = 0;
 }
 
@@ -222,12 +221,15 @@ int main(int argc, char* argv[])
 		} 
 		while (Living);
 	}
+
 	ShowOpLogInfo(1);
 	LOGFIX0("Ready to exit...");
 	StopServer();
+	StopHttpThread();
 	CloseCacheFile();
 	LOGFIX0("Exit eru_agent...");
 	close_log();
+
 	return 0;
 }
 

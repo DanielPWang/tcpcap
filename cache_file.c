@@ -15,7 +15,7 @@ static uint64_t g_nCacheFileSize = DEFAULT_FILE_SIZE;
 
 void SetCacheFileSize(int nSize)
 {
-	g_nCacheFileSize = nSize * 1024 * 1024;
+	g_nCacheFileSize = (uint64_t)nSize * 1024 * 1024;
 }
 
 int IsCacheFullDays(int nFullDays)
@@ -370,7 +370,7 @@ int ReadNextCacheRecord(CacheFileDef* pCacheFile, char** pBuffer)
 			if (fwrite(&pCacheFile->nReadCount, sizeof(int), 1, pCacheFile->pFile) != 1)
 				nRs = -4;
 			
-			pCacheFile->nReadOffset += nReadTotal + sizeof(int);
+			pCacheFile->nReadOffset += (uint64_t)nReadTotal + sizeof(int);
 			if (fwrite(&pCacheFile->nReadOffset, sizeof(uint64_t), 1, pCacheFile->pFile) != 1)
 				nRs = -5;
 			
@@ -424,7 +424,7 @@ int WriteNextCacheRecord(CacheFileDef* pCacheFile, const char* pBuffer, int nLen
 		
 		if (0 == nRs)
 		{
-			pCacheFile->nWriteOffset += nWriteTotal + sizeof(int);
+			pCacheFile->nWriteOffset += (uint64_t)nWriteTotal + sizeof(int);
 			fseeko(pCacheFile->pFile, 23, SEEK_SET);			
 			if (fwrite(&pCacheFile->nWriteOffset, sizeof(uint64_t), 1, pCacheFile->pFile) != 1)
 				nRs = -3;

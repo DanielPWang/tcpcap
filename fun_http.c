@@ -20,6 +20,9 @@
 #include <fun_all.h>
 #include <fun_http.h>
 
+static volatile int _runing = 1;
+static pthread_t _http_thread;
+
 struct hosts_t *_monitor_hosts = NULL;
 size_t _monitor_hosts_count = 0;
 
@@ -127,29 +130,33 @@ enum HTTP_APPEND_STATUS {
 
 // IDL -> REQUESTING -> REQUEST -> REPONSEING -> REPONSE -> FINISH
 //           |------------|------------|------------------> TIMEOUT
-extern volatile int Living;
 static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
 
 void ShowOpLogInfo(int bIsPrintScreen)
 {
+	static uint64_t nPreCapSize = 0;
 	static uint32_t nPreCapTime = 0;
+	uint64_t nIntervalCapSize = 0;
 	uint32_t nIntervalCostTime = 0;
 	int nCurSessionUsedCount = g_nMaxHttpSessionCount - len_queue(_idl_session);
 	if (0 == nPreCapTime)
 	{
 		nIntervalCostTime = g_nCapLastTime - g_nCapFisrtTime;
+		nIntervalCapSize = g_nCapSize;
 		nPreCapTime = g_nCapLastTime;
+		nPreCapSize = g_nCapSize;
 	}
 	else
 	{
+		nIntervalCapSize = g_nCapSize - nPreCapSize;
 		nIntervalCostTime = g_nCapLastTime - nPreCapTime;
 	}
 	uint64_t nFlow = 0;
 	if (nIntervalCostTime != 0)
 	{
-		nFlow = g_nCapSize / nIntervalCostTime;
+		nFlow = nIntervalCapSize / (uint64_t)nIntervalCostTime;
 		nFlow = (nFlow*8) / (1024*1024);
 	}
 	
@@ -1166,8 +1173,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 
 void *HTTP_Thread(void* param)
 {
-	volatile int *active = (int*)param;
-	while (*active)
+	while (_runing)
 	{
 		int nPackSize = len_queue(_packets);
 		if (nPackSize > g_nMaxUsedPackSize)
@@ -1302,13 +1308,38 @@ int HttpInit()
 		push_queue(_idl_session, &_http_session[index]);
 	}
 
-	//for (int n=0; n<1; ++n) {
-	pthread_t pthreadid;
-	int err = pthread_create(&pthreadid, NULL, &HTTP_Thread, (void*)&Living);
+	int err = pthread_create(&_http_thread, NULL, &HTTP_Thread, NULL);
 	ASSERT(err==0);
-	// }
-
+	
 	return _packets==NULL? -1:0;
+}
+
+void StopHttpThread()
+{
+	_runing = 0;
+	void* result;
+	pthread_join(_http_thread, &result);
+
+	for (int i = 0; i < g_nMaxHttpSessionCount; i++) 
+	{
+		if (_http_session[i].flag != HTTP_SESSION_IDL) 
+		{
+			struct tcp_session* pSession = &_http_session[i];
+			CleanHttpSession(pSession);	
+		}
+	}
+
+	void* pPacket = NULL;
+	while ((pPacket = pop_queue(_packets)) != NULL)
+	{
+		free(pPacket);
+	}
+	
+	free(_http_session);
+	destory_queue(_packets);
+	destory_queue(_whole_content);
+	destory_queue(_idl_session);
+	
 }
 
 int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)

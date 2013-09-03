@@ -16,6 +16,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack);
 int AppendClientToServer(int nIndex, const char* pPacket);
 int AppendReponse(const char* packet, int bIsCurPack);
 void ShowOpLogInfo(int bIsPrintScreen);
+void StopHttpThread();
+
 
 
 #endif
