@@ -129,9 +129,6 @@ int main(int argc, char* argv[])
 		LOGFATAL0("Can Open any monitor!");
 		return 0;
 	}
-	// start server
-	int nerr = StartServer();
-	ASSERT(nerr == 0);
 
 	// init protocol_proc
 	HttpInit();
@@ -144,6 +141,10 @@ int main(int argc, char* argv[])
 
 	if (_net_flow_func_on)
 		FlowInit();
+	
+	// start server
+	int nerr = StartServer();
+	ASSERT(nerr == 0);
 
 	// capture and process
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);
