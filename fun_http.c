@@ -425,13 +425,17 @@ int NewHttpSession(const char* packet)
 			_http_session[index].flag != HTTP_SESSION_FINISH) 
 		{
 			struct tcp_session* pREQ = &_http_session[index];
-			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source && 
-				pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest) 
+			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source 
+				&& pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest
+				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq) 
 			{ // client -> server be reuse.
 				++g_nReusedCount;
-				LOGWARN("session[%d] channel is reused. flag=%d res1=%d res2=%d g_nReusedCount=%d", index, pREQ->flag, pREQ->res1, pREQ->res2, g_nReusedCount);
+				LOGWARN("session[%d] channel is reused. \n \ 
+							flag=%d, res1=%u, res2=%u, session.seq=%u, session.ack=%u, iphead.seq=%u, iphead.ack=%u; g_nReusedCount=%d", 
+						index, pREQ->flag, pREQ->res1, pREQ->res2, 
+						pREQ->seq, pREQ->ack, tcphead->seq, tcphead->ack_seq, g_nReusedCount);
+
 				CleanHttpSession(pREQ);
-				break;
 			} 
 			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout) 
 			{
@@ -439,16 +443,11 @@ int NewHttpSession(const char* packet)
 				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
 				LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
 				CleanHttpSession(pREQ);
-				break;
 			} 
 			else 
 			{
 				continue;
 			}
-		}
-		else if (HTTP_SESSION_IDL == _http_session[index].flag)
-		{
-			break;
 		}
 	}
 
@@ -551,6 +550,9 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 
 			if ((*(unsigned*)content == _http_image) && (pSession->transfer_flag != HTTP_TRANSFER_INIT))
 			{
+				LOGWARN("Drop this packet for response repeatly. Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				
 				return HTTP_APPEND_DROP_PACKET;
 			}
 		}

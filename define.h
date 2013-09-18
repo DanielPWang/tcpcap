@@ -3,7 +3,7 @@
 
 #define VER_MAJOR 1
 #define VER_MINOR 1
-#define VER_PATCH 2
+#define VER_PATCH 3
 
 #define MONITOR_COUNT 5
 
