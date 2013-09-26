@@ -21,6 +21,7 @@
 #include <fun_http.h>
 #include <server.h>
 #include "define.h"
+#include <block.h>
 
 int SockManager;
 extern int SockMonitor[MONITOR_COUNT];
@@ -145,6 +146,8 @@ int main(int argc, char* argv[])
 	// start server
 	int nerr = StartServer();
 	ASSERT(nerr == 0);
+
+	InitBlockProc();
 
 	// capture and process
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);

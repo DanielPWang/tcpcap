@@ -19,6 +19,7 @@
 #include <define.h>
 #include <fun_all.h>
 #include <fun_http.h>
+#include <block.h>
 
 static volatile int _runing = 1;
 static pthread_t _http_thread;
@@ -1194,7 +1195,6 @@ void *HTTP_Thread(void* param)
 		else
 			g_nSessionLastTime = time(NULL);
 		
-		struct timeval *tv = (struct timeval*)packet;
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
@@ -1212,6 +1212,18 @@ void *HTTP_Thread(void* param)
 		if (*cmd == _get_image || *cmd == _post_image) 
 		{
 			int nRes = 0;
+
+			struct in_addr tmpIp;
+			inet_aton("10.55.100.201", &tmpIp);
+				
+			if (iphead->daddr == tmpIp.s_addr)
+			{
+				int nr =  BlockHttpRequest(packet);
+				LOGINFO("Block http request. return code = %d", nr);
+			}
+
+			struct timeval *tv = (struct timeval*)packet;
+			gettimeofday(tv, NULL);
 			if ((nRes = NewHttpSession(packet)) < 0) 
 			{
 				if (nRes == -3) 
@@ -1242,6 +1254,8 @@ void *HTTP_Thread(void* param)
 			continue;
 		}
 
+		struct timeval *tv = (struct timeval*)packet;
+		gettimeofday(tv, NULL);
 		int nIndex = AppendReponse(packet, 1);
 		if (nIndex == HTTP_APPEND_DROP_PACKET) 
 		{
@@ -1401,8 +1415,6 @@ int inExcludeHosts(const char* buffer, const struct iphdr* iphead, const struct 
 
 int PushHttpPack(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
 {	
-	struct timeval *tv = (struct timeval*)buffer;
-	gettimeofday(tv, NULL);
 	int err = push_queue(_packets, (const void*) buffer);
 	if (err < 0) 
 	{
