@@ -2,8 +2,8 @@
 #define __DEFINE_H__
 
 #define VER_MAJOR 1
-#define VER_MINOR 1
-#define VER_PATCH 3
+#define VER_MINOR 2
+#define VER_PATCH 1
 
 #define MONITOR_COUNT 5
 
@@ -15,7 +15,7 @@
 extern const char* CONFIG_PATH;
 
 // capture
-#define RECV_BUFFER_LEN   4096 // 8192
+#define RECV_BUFFER_LEN   4500 // 8192
 
 // HTTP
 #define MAX_HTTP_SESSIONS 6000
@@ -38,6 +38,9 @@ extern const char* CONFIG_PATH;
 
 // server
 #define SERVER_PORT 2012
+
+//block
+#define MAX_BLOCK_ITEM  500
 
 // share memory
 #define SHMKEY 0x889900

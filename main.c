@@ -28,6 +28,7 @@ extern int SockMonitor[MONITOR_COUNT];
 volatile int Living = 1;
 volatile int NeedReloadConfig = 0;
 int _net_flow_func_on = 0;
+int _block_func_on = 0;
 
 uint64_t g_nCapCount = 0;
 uint64_t g_nCapSize = 0;
@@ -147,7 +148,14 @@ int main(int argc, char* argv[])
 	int nerr = StartServer();
 	ASSERT(nerr == 0);
 
-	InitBlockProc();
+	// init block proc
+	char szBlockFunc[10] = {0};
+	GetValue(CONFIG_PATH, "block_func", szBlockFunc, 6);
+	if (strcmp(szBlockFunc, "true") == 0)
+		_block_func_on = 1;
+
+	if (_block_func_on)
+		InitBlockProc();
 
 	// capture and process
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);

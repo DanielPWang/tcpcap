@@ -17,6 +17,7 @@
 #include <fun_all.h>
 #include <fun_http.h>
 #include <fun_flow.h>
+#include <block.h>
 #include <cache_file.h>
 
 extern struct hosts_t *_monitor_hosts;
@@ -32,6 +33,7 @@ static int _client_config_socket = -1;
 static char _client_config_ip[16] = {0};
 static time_t _flow_socket_start_time = 0;
 extern int _net_flow_func_on;
+extern int _block_func_on;
 
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
@@ -233,7 +235,8 @@ int RecvData(int sock, struct msg_head *pMsgHead, char **pData)
 	if ((pMsgHead->type != MSG_TYPE_REQ_GET_IPLIST)
 		&& (pMsgHead->type != MSG_TYPE_REQ_SET_IPLIST)
 		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW)
-		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW_STOP))
+		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW_STOP)
+		&& (pMsgHead->type != MSG_TYPE_REQ_BLOCK))
 	{
 		LOGERROR0("Message type error!");
 		return -1;
@@ -669,22 +672,27 @@ int ProcessClientSockReq()
 	}
 	else
 	{
-		if (_net_flow_func_on)
+		if (_block_func_on && (MSG_TYPE_REQ_BLOCK == msgHead.type))
 		{
-			if (MSG_TYPE_REQ_FLOW == msgHead.type)
-			{
-				AddServer(pRecvData);
-				if (0 == _flow_socket_start_time)
-					_flow_socket_start_time = time(NULL);
-			}
-			else if (MSG_TYPE_REQ_FLOW_STOP == msgHead.type)
-			{
-				StopServerFlow(pRecvData);
-			}
-
-			if (pRecvData != NULL)
-				free(pRecvData);
+			int nRsAdd = AddBlockData(pRecvData);
+			if ((0 == nRsAdd) || (1 == nRsAdd))
+				LOGINFO0("Success to add block data.");
+			else
+				LOGWARN0("Fail to add block data! Block item list is full.");
 		}
+		else if (_net_flow_func_on && (MSG_TYPE_REQ_FLOW == msgHead.type))
+		{
+			AddServer(pRecvData);
+			if (0 == _flow_socket_start_time)
+				_flow_socket_start_time = time(NULL);
+		}
+		else if (_net_flow_func_on && (MSG_TYPE_REQ_FLOW_STOP == msgHead.type))
+		{
+			StopServerFlow(pRecvData);
+		}
+		
+		if (pRecvData != NULL)
+			free(pRecvData);
 	}
 
 	return nRs;

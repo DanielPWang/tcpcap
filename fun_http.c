@@ -92,6 +92,8 @@ static struct queue_t *_whole_content = NULL;		// http_session.flag = HTTP_SESSI
 extern volatile int g_nFlagGetData;
 extern volatile int g_nFlagSendData;
 
+extern int _block_func_on;
+
 enum HTTP_SESSION_FLAGS { 
 	HTTP_SESSION_IDL, 
 	HTTP_SESSION_REQUESTING,
@@ -925,6 +927,9 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	else if (HTTP_TRANSFER_CHUNKED == pSession->transfer_flag)
 	{
 		char *pszChunkedEnd = memmem(content, contentlen, "\r\n0\r\n\r\n", 7);
+		if (pszChunkedEnd == NULL)
+			pszChunkedEnd = memmem(content, contentlen, "\r\n00000000\r\n\r\n", 14);
+		
 		if (pszChunkedEnd != NULL)
 		{
 			LOGDEBUG("Session[%d]end_reponse with chunked data", nIndex);
@@ -1205,23 +1210,30 @@ void *HTTP_Thread(void* param)
 			continue; 
 		} 
 
-		tcphead->seq = ntohl(tcphead->seq);
-		tcphead->ack_seq = ntohl(tcphead->ack_seq);
-
 		unsigned *cmd = (unsigned*)content;
 		if (*cmd == _get_image || *cmd == _post_image) 
 		{
 			int nRes = 0;
 
-			struct in_addr tmpIp;
-			inet_aton("10.55.100.201", &tmpIp);
-				
-			if (iphead->daddr == tmpIp.s_addr)
+			if (_block_func_on && (GetBlockItemCnt() > 0))
 			{
-				int nr =  BlockHttpRequest(packet);
-				LOGINFO("Block http request. return code = %d", nr);
+				if (FilterBlockList(packet))
+				{
+					if (BlockHttpRequest(packet))
+					{
+						struct in_addr sip; 
+						struct in_addr dip; 
+						sip.s_addr = iphead->saddr;
+						dip.s_addr = iphead->daddr;
+						char ssip[16], sdip[16];
+						LOGINFO("Success to block client request(%s => %s)!", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
+					}
+				}
 			}
-
+			
+			tcphead->seq = ntohl(tcphead->seq);
+			tcphead->ack_seq = ntohl(tcphead->ack_seq);
+			
 			struct timeval *tv = (struct timeval*)packet;
 			gettimeofday(tv, NULL);
 			if ((nRes = NewHttpSession(packet)) < 0) 
@@ -1254,6 +1266,9 @@ void *HTTP_Thread(void* param)
 			continue;
 		}
 
+		tcphead->seq = ntohl(tcphead->seq);
+		tcphead->ack_seq = ntohl(tcphead->ack_seq);
+		
 		struct timeval *tv = (struct timeval*)packet;
 		gettimeofday(tv, NULL);
 		int nIndex = AppendReponse(packet, 1);
