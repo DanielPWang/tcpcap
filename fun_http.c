@@ -120,6 +120,9 @@ enum HTTP_CONTENT_TYPE {
 	HTTP_CONTENT_FILE_PDF,
 	HTTP_CONTENT_FILE_KDH,
 	HTTP_CONTENT_FILE_CEB,
+	HTTP_CONTENT_FILE_RIS,
+	HTTP_CONTENT_FILE_BIB,
+	HTTP_CONTENT_FILE_TXT,
 	HTTP_CONTENT_FILE_OTHER
 };
 
@@ -780,6 +783,30 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				else
 					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
 			}
+			else if (strncmp(content_type+14, "application/x-research-info-systems", 35) == 0)
+			{
+				char* pszFileType = memmem(content, contentlen, ".ris", 4);
+				if (pszFileType != NULL)
+					pSession->content_type = HTTP_CONTENT_FILE_RIS;					
+				else
+					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+			}
+			else if (strncmp(content_type+14, "application/bibtex", 18) == 0)
+			{
+				char* pszFileType = memmem(content, contentlen, ".bib", 4);
+				if (pszFileType != NULL)
+					pSession->content_type = HTTP_CONTENT_FILE_BIB;					
+				else
+					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+			}
+			else if (strncmp(content_type+14, "application/x-no-such-app", 25) == 0)
+			{
+				char* pszFileType = memmem(content, contentlen, ".txt", 4);
+				if (pszFileType != NULL)
+					pSession->content_type = HTTP_CONTENT_FILE_TXT;					
+				else
+					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+			}
 		}
 		else if (pSession->content_type != HTTP_CONTENT_RES)
 		{
@@ -849,10 +876,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				}
 			}
 		}
-		else if ((HTTP_CONTENT_FILE_PDF == pSession->content_type)
-				 || (HTTP_CONTENT_FILE_KDH == pSession->content_type)
-				 || (HTTP_CONTENT_FILE_CEB == pSession->content_type)
-				 || (HTTP_CONTENT_FILE_OTHER == pSession->content_type))
+		else if ((pSession->content_type >= HTTP_CONTENT_FILE_PDF)
+				 && (pSession->content_type <= HTTP_CONTENT_FILE_OTHER))
 		{
 			pSession->content_encoding_gzip = 0;
 			pSession->transfer_flag = HTTP_TRANSFER_FILE;
@@ -1967,6 +1992,12 @@ int GetHttpData(char **data)
 				strcpy(szEmptyHtml, "<html><head><title>kdh file</title></head><body></body></html>\r\n");
 			else if (HTTP_CONTENT_FILE_CEB == pSession->content_type)
 				strcpy(szEmptyHtml, "<html><head><title>ceb file</title></head><body></body></html>\r\n");
+			else if (HTTP_CONTENT_FILE_RIS == pSession->content_type)
+				strcpy(szEmptyHtml, "<html><head><title>ris file</title></head><body></body></html>\r\n");
+			else if (HTTP_CONTENT_FILE_BIB == pSession->content_type)
+				strcpy(szEmptyHtml, "<html><head><title>bib file</title></head><body></body></html>\r\n");
+			else if (HTTP_CONTENT_FILE_TXT == pSession->content_type)
+				strcpy(szEmptyHtml, "<html><head><title>txt file</title></head><body></body></html>\r\n");
 			else if (HTTP_CONTENT_FILE_OTHER == pSession->content_type)
 				strcpy(szEmptyHtml, "<html><head><title>other file</title></head><body></body></html>\r\n");
 			

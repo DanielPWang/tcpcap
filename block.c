@@ -22,10 +22,10 @@
 #include <block.h>
 
 static int g_block_socket = -1;
-const char g_szBlockHtml[400] = {0};
+char g_szBlockHtml[400] = {0};
 //const char g_szBlockHtml[] = "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"center\"><h1>你对当前网站的操作过于频繁，将实行短时阻断!</h1></TD></TR></TABLE></body></html>\n";
 
-static uint8_t g_szBlockBuffer[512] = {0};
+static uint8_t g_szBlockBuffer[640] = {0};
 static uint32_t g_nBlockBufferLen = 0;
 static struct sockaddr_ll g_sa = {0};
 unsigned int g_ipID = 0x005d;
@@ -37,7 +37,7 @@ pthread_mutex_t g_block_list_lock = PTHREAD_MUTEX_INITIALIZER;
 int InitBlockProc()
 {
 	char szBlockMsg[240] = {0};
-	if (GetValue(CONFIG_PATH, "block_msg", szBlockMsg, 6) == NULL)
+	if (GetValue(CONFIG_PATH, "block_msg", szBlockMsg, 239) == NULL)
 		strcpy(szBlockMsg, "Your visiting in current website will be restricted for a short time!");
 	
 	strcpy(g_szBlockHtml, "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"center\"><h1>");
@@ -109,6 +109,11 @@ int AddBlockData(const char* pRecvData)
 
 	pthread_mutex_lock(&g_block_list_lock);
 
+	pReq->nBlockMode = ntohl(pReq->nBlockMode);
+	pReq->nTimeLong = ntohl(pReq->nTimeLong);
+	pReq->nServerID = ntohl(pReq->nServerID);
+	pReq->nServerIpLen = ntohl(pReq->nServerIpLen);
+		
 	pReq->nBlockMode++;
 	
 	for (int i = 0; i < MAX_BLOCK_ITEM; i++)
