@@ -184,17 +184,6 @@ int AddBlockData(const char* pRecvData)
 				pBlockItemIdle->nServerIpCount = count_char(pServerIpTmp, ',') + 1;
 				pBlockItemIdle->phServer = (struct hosts_t *)calloc(sizeof(struct hosts_t), pBlockItemIdle->nServerIpCount);
 
-				char *left = NULL, *right = NULL, *ipport = NULL;
-				for (int i = 0, left = pServerIpTmp; ;left = NULL) 
-				{
-					ipport = strtok_r(left, ",", &right);
-					if (NULL == ipport) 
-						break;
-
-					if (str_ipp(ipport, &pBlockItemIdle->phServer[i])) 
-						++i;
-				}
-				
 				LOGINFO("Add Block Item; Block Mode=%d, \n \
 							Client IP=%s, \n \
 							Server ID=%d, \n \
@@ -207,6 +196,17 @@ int AddBlockData(const char* pRecvData)
 							pBlockItemIdle->nServerIpCount,
 							pServerIpTmp,
 							pReq->nTimeLong);
+				
+				char *left = NULL, *right = NULL, *ipport = NULL;
+				for (int i = 0, left = pServerIpTmp; ;left = NULL) 
+				{
+					ipport = strtok_r(left, ",", &right);
+					if (NULL == ipport) 
+						break;
+
+					if (str_ipp(ipport, &pBlockItemIdle->phServer[i])) 
+						++i;
+				}
 				
 				pBlockItemIdle->nEndTime = time(NULL) + pReq->nTimeLong;
 				g_nBlockItemCount++;

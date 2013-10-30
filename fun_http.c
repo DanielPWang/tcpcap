@@ -120,6 +120,8 @@ enum HTTP_CONTENT_TYPE {
 	HTTP_CONTENT_FILE_PDF,
 	HTTP_CONTENT_FILE_KDH,
 	HTTP_CONTENT_FILE_CEB,
+	HTTP_CONTENT_FILE_CAJ,
+	HTTP_CONTENT_FILE_MARC,
 	HTTP_CONTENT_FILE_RIS,
 	HTTP_CONTENT_FILE_BIB,
 	HTTP_CONTENT_FILE_TXT,
@@ -744,6 +746,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			{
 				pSession->content_type = HTTP_CONTENT_FILE_KDH;
 			}
+			else if (strncmp(content_type+14, "text/application/x-research-info-systems", 40) == 0)
+			{
+				pSession->content_type = HTTP_CONTENT_FILE_RIS;
+			}
 			else if (strncmp(content_type+14, "application/x-ceb", 17) == 0)
 			{
 				if (pSession->request_head != NULL)
@@ -780,6 +786,22 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				char* pszFileType = memmem(content, contentlen, ".pdf", 4);
 				if (pszFileType != NULL)
 					pSession->content_type = HTTP_CONTENT_FILE_PDF;					
+				else
+					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+			}
+			else if (strncmp(content_type+14, "application/caj", 15) == 0)
+			{
+				char* pszFileType = memmem(content, contentlen, ".caj", 4);
+				if (pszFileType != NULL)
+					pSession->content_type = HTTP_CONTENT_FILE_CAJ;					
+				else
+					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+			}
+			else if (strncmp(content_type+14, "application/text", 16) == 0)
+			{
+				char* pszFileType = memmem(content, contentlen, ".marc", 4);
+				if (pszFileType != NULL)
+					pSession->content_type = HTTP_CONTENT_FILE_MARC;					
 				else
 					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
 			}
@@ -1992,6 +2014,10 @@ int GetHttpData(char **data)
 				strcpy(szEmptyHtml, "<html><head><title>kdh file</title></head><body></body></html>\r\n");
 			else if (HTTP_CONTENT_FILE_CEB == pSession->content_type)
 				strcpy(szEmptyHtml, "<html><head><title>ceb file</title></head><body></body></html>\r\n");
+			else if (HTTP_CONTENT_FILE_CAJ == pSession->content_type)
+				strcpy(szEmptyHtml, "<html><head><title>caj file</title></head><body></body></html>\r\n");
+			else if (HTTP_CONTENT_FILE_MARC == pSession->content_type)
+				strcpy(szEmptyHtml, "<html><head><title>marc file</title></head><body></body></html>\r\n");
 			else if (HTTP_CONTENT_FILE_RIS == pSession->content_type)
 				strcpy(szEmptyHtml, "<html><head><title>ris file</title></head><body></body></html>\r\n");
 			else if (HTTP_CONTENT_FILE_BIB == pSession->content_type)
