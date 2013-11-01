@@ -125,6 +125,7 @@ enum HTTP_CONTENT_TYPE {
 	HTTP_CONTENT_FILE_RIS,
 	HTTP_CONTENT_FILE_BIB,
 	HTTP_CONTENT_FILE_TXT,
+	HTTP_CONTENT_FILE_PDG,
 	HTTP_CONTENT_FILE_OTHER
 };
 
@@ -750,6 +751,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			{
 				pSession->content_type = HTTP_CONTENT_FILE_RIS;
 			}
+			else if (strncmp(content_type+14, "application/.pdg", 16) == 0)
+			{
+				pSession->content_type = HTTP_CONTENT_FILE_PDG;
+			}
 			else if (strncmp(content_type+14, "application/x-ceb", 17) == 0)
 			{
 				if (pSession->request_head != NULL)
@@ -851,6 +856,14 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				{
 					LOGDEBUG("Session[%d]with transfer none, g_nNone=%d content= %s", nIndex, ++g_nNone, content);
 					pSession->transfer_flag = HTTP_TRANSFER_NONE;
+				}
+			}
+			else
+			{
+				char *pszSB = memmem(pSession->request_head, pSession->request_head_len, "showbook.do", 11);
+				if (pszSB != NULL)
+				{
+					pSession->content_type = HTTP_CONTENT_HTML;
 				}
 			}
 		}
@@ -1672,11 +1685,14 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 	gzFile p = gzopen(gzfile, "r");
 	int nReaded = 0;
 	int n = 0;
+	int nRepeatRead = 0;
 	if (plain_len > 0)
 	{
-		while (!gzeof(p)) {
+		while (!gzeof(p)) 
+		{
 			n = gzread(p, pPlain+nReaded, plain_len+1024-nReaded);
-			if (n == -1) {
+			if ((n == -1) || (n == 0))
+			{
 				LOGWARN("gzread() return -1. %s", strerror(errno));
 				break;
 			}
@@ -1689,15 +1705,23 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 	}
 	else
 	{
-		while (!gzeof(p)) {
+		while (!gzeof(p)) 
+		{
 			n = gzread(p, pPlain+nReaded, 5120);
 			LOGDEBUG("gzread() return %d", n);
-			if (n == -1) {
+			if ((n == -1) || (n == 0))
+			{
 				LOGWARN("gzread() return -1. %s", strerror(errno));
 				break;
 			}
 			nReaded += n;
 			pPlain = realloc(pPlain, nReaded + 5120);
+
+			if (++nRepeatRead >= 200)
+			{
+				LOGWARN0("Time of gzread >= 200! Stop to gzread!");
+				break;
+			}
 		}
 	}
 	
@@ -2024,6 +2048,8 @@ int GetHttpData(char **data)
 				strcpy(szEmptyHtml, "<html><head><title>bib file</title></head><body></body></html>\r\n");
 			else if (HTTP_CONTENT_FILE_TXT == pSession->content_type)
 				strcpy(szEmptyHtml, "<html><head><title>txt file</title></head><body></body></html>\r\n");
+			else if (HTTP_CONTENT_FILE_PDG == pSession->content_type)
+				strcpy(szEmptyHtml, "<html><head><title>pdg file</title></head><body></body></html>\r\n");
 			else if (HTTP_CONTENT_FILE_OTHER == pSession->content_type)
 				strcpy(szEmptyHtml, "<html><head><title>other file</title></head><body></body></html>\r\n");
 			
