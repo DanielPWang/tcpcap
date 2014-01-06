@@ -25,6 +25,8 @@ static int g_block_socket = -1;
 char g_szBlockHtml[400] = {0};
 //const char g_szBlockHtml[] = "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"center\"><h1>你对当前网站的操作过于频繁，将实行短时阻断!</h1></TD></TR></TABLE></body></html>\n";
 
+static int g_bIsExistMac = 0;
+static uint8_t g_destMac[6] = {0};
 static uint8_t g_szBlockBuffer[640] = {0};
 static uint32_t g_nBlockBufferLen = 0;
 static struct sockaddr_ll g_sa = {0};
@@ -61,7 +63,42 @@ int InitBlockProc()
 
 	char szBlock[10] = {0};
 	GetValue(CONFIG_PATH, "block", szBlock, 6);
+
+	char szDescMac[30] = {0};
+	if (GetValue(CONFIG_PATH, "block_dest_mac", szDescMac, 29) != NULL)
+	{
+		if (strcmp(szDescMac, "00-00-00-00-00-00") != 0)
+		{
+			char *left, *right, *mac;
+			char *pszEnd;
+			for(int i = 0, left = szDescMac; i < 6;left = NULL, i++) 
+			{
+				mac = strtok_r(left, "-", &right);
+				if (NULL == mac) 
+					break;
+				
+				g_destMac[i] = (uint8_t)strtol(mac, &pszEnd, 16);
+			}
+
+			printf("Block dest mac is config to %x-%x-%x-%x-%x-%x \n", 
+				g_destMac[0], g_destMac[1], g_destMac[2], g_destMac[3], g_destMac[4], g_destMac[5]);
+			LOGFIX("Block dest mac is config to %x-%x-%x-%x-%x-%x \n", 
+				g_destMac[0], g_destMac[1], g_destMac[2], g_destMac[3], g_destMac[4], g_destMac[5]);
 			
+			g_bIsExistMac = 1;	
+		}
+		else
+		{
+			LOGWARN("Block dest mac is not config!", CONFIG_PATH);
+			printf("Block dest mac is not config!\n");
+		}
+	}
+	else
+	{
+		LOGWARN("Block dest mac is not config!", CONFIG_PATH);
+		printf("Block dest mac is not config!\n");
+	}
+	
 	struct ifreq ifstruct;
 	strcpy(ifstruct.ifr_name, szBlock);	
 	if (ioctl(g_block_socket, SIOCGIFINDEX, &ifstruct) == -1)
@@ -304,8 +341,18 @@ int BlockHttpRequest(const char* pPacket)
 	struct iphdr *pReqIphead = IPHDR(pPacket);
 	struct tcphdr *pReqTcphead = TCPHDR(pReqIphead);
 
-	memcpy(pRespEtherHdr->ether_dhost, pEtherhead->ether_shost, 6);
-	memcpy(pRespEtherHdr->ether_shost, pEtherhead->ether_dhost, 6);
+	//memcpy(pRespEtherHdr->ether_shost, pEtherhead->ether_dhost, 6);
+	if (g_bIsExistMac)
+		memcpy(pRespEtherHdr->ether_dhost, g_destMac, 6);
+	else
+		memcpy(pRespEtherHdr->ether_dhost, pEtherhead->ether_shost, 6);
+	
+	pRespEtherHdr->ether_shost[0] = 0x00;
+	pRespEtherHdr->ether_shost[1] = 0x9c;
+	pRespEtherHdr->ether_shost[2] = 0x1d;
+	pRespEtherHdr->ether_shost[3] = 0xb8;
+	pRespEtherHdr->ether_shost[4] = 0x00;
+	pRespEtherHdr->ether_shost[5] = 0xf2;
 	pRespEtherHdr->ether_type = htons(ETHERTYPE_IP);
 	
 	pRespIpHdr->check = 0;

@@ -1688,7 +1688,7 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 	int nRepeatRead = 0;
 	if (plain_len > 0)
 	{
-		while (!gzeof(p)) 
+		while (!gzeof(p) && (nReaded < plain_len)) 
 		{
 			n = gzread(p, pPlain+nReaded, plain_len+1024-nReaded);
 			if ((n == -1) || (n == 0))
