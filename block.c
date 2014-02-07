@@ -22,13 +22,8 @@
 #include <block.h>
 
 static int g_block_socket = -1;
-char g_szBlockHtml[400] = {0};
-//const char g_szBlockHtml[] = "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"center\"><h1>你对当前网站的操作过于频繁，将实行短时阻断!</h1></TD></TR></TABLE></body></html>\n";
-
 static int g_bIsExistMac = 0;
 static uint8_t g_destMac[6] = {0};
-static uint8_t g_szBlockBuffer[640] = {0};
-static uint32_t g_nBlockBufferLen = 0;
 static struct sockaddr_ll g_sa = {0};
 unsigned int g_ipID = 0x005d;
 static int g_nBlockItemCount = 0;
@@ -38,22 +33,6 @@ pthread_mutex_t g_block_list_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int InitBlockProc()
 {
-	char szBlockMsg[240] = {0};
-	if (GetValue(CONFIG_PATH, "block_msg", szBlockMsg, 239) == NULL)
-		strcpy(szBlockMsg, "Your visiting in current website will be restricted for a short time!");
-	
-	strcpy(g_szBlockHtml, "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"center\"><h1>");
-	strcat(g_szBlockHtml, szBlockMsg);
-	strcat(g_szBlockHtml, "</h1></TD></TR></TABLE></body></html>\n");
-
-	sprintf((char*)g_szBlockBuffer + PACKET_HEADER_LEN, 
-				"HTTP/1.1 200 OK\r\n"
-				"Content-Type: text/html\r\n"
-				"Content-Length: %d\r\n"
-				"Connection: close\r\n\r\n%s",
-				strlen(g_szBlockHtml), g_szBlockHtml);
-	
-	g_nBlockBufferLen = strlen(g_szBlockBuffer + PACKET_HEADER_LEN);
 	if((g_block_socket = socket(PF_PACKET, SOCK_RAW, htons(IPPROTO_TCP))) == -1)
 	{		
 		g_block_socket = -1;
@@ -220,7 +199,9 @@ int AddBlockData(const char* pRecvData)
 				pBlockItemIdle->nServerID = pReq->nServerID;
 				pBlockItemIdle->nServerIpCount = count_char(pServerIpTmp, ',') + 1;
 				pBlockItemIdle->phServer = (struct hosts_t *)calloc(sizeof(struct hosts_t), pBlockItemIdle->nServerIpCount);
-
+				memset(pBlockItemIdle->szBlockInfo, 0, sizeof(pBlockItemIdle->szBlockInfo));
+				strcpy(pBlockItemIdle->szBlockInfo, pReq->szBlockInfo);
+					
 				LOGINFO("Add Block Item; Block Mode=%d, \n \
 							Client IP=%s, \n \
 							Server ID=%d, \n \
@@ -270,7 +251,7 @@ int AddBlockData(const char* pRecvData)
 
 int FilterBlockList(const char* pPacket)
 {
-	int nRs = 0;
+	int nRs = -1;
 	struct iphdr *pReqIphead = IPHDR(pPacket);
 	struct tcphdr *pReqTcphead = TCPHDR(pReqIphead);
 
@@ -291,7 +272,7 @@ int FilterBlockList(const char* pPacket)
 							 && ((pBlockItem->phServer[j].port == 0)
 							 	 || (pReqTcphead->dest == pBlockItem->phServer[j].port)))
 						{
-							nRs = 1;
+							nRs = i;
 							break;
 						}
 					}
@@ -306,14 +287,14 @@ int FilterBlockList(const char* pPacket)
 								 && ((pBlockItem->phServer[j].port == 0)
 								 	 || (pReqTcphead->dest == pBlockItem->phServer[j].port)))
 							{
-								nRs = 1;
+								nRs = i;
 								break;
 							}
 						}
 					}
 				}
 
-				if (1 == nRs)
+				if (nRs != -1)
 					break;
 			}
 			else
@@ -326,20 +307,40 @@ int FilterBlockList(const char* pPacket)
 	return nRs;
 }
 
-int BlockHttpRequest(const char* pPacket)
+int BlockHttpRequest(const char* pPacket, int nBlockItemIndex)
 {
 	if (-1 == g_block_socket)
 		return 0;
 	
 	/* SENDING BLOCK PAGE TO CLIENT */
-	memset(g_szBlockBuffer, 0, PACKET_HEADER_LEN);
-	struct ether_header* pRespEtherHdr = (struct ether_header*)(g_szBlockBuffer);
-	struct iphdr*  pRespIpHdr = (struct iphdr*)(g_szBlockBuffer + sizeof(struct ether_header));
-	struct tcphdr* pRespTcpHdr	= (struct tcphdr*)(g_szBlockBuffer + sizeof(struct ether_header) + sizeof(struct iphdr));
+	uint8_t szBlockBuffer[3000] = {0};
+	char szBlockHtml[1700] = {0};
+	char szBlockHttpContent[2000] = {0};
+	
+	struct ether_header* pRespEtherHdr = (struct ether_header*)(szBlockBuffer);
+	struct iphdr*  pRespIpHdr = (struct iphdr*)(szBlockBuffer + sizeof(struct ether_header));
+	struct tcphdr* pRespTcpHdr	= (struct tcphdr*)(szBlockBuffer + sizeof(struct ether_header) + sizeof(struct iphdr));
 
 	struct ether_header *pEtherhead = (struct ether_header*)pPacket;
 	struct iphdr *pReqIphead = IPHDR(pPacket);
 	struct tcphdr *pReqTcphead = TCPHDR(pReqIphead);
+
+	/* Create block buffer */
+	BlockItemDef *pBlockItem = &g_block_list[nBlockItemIndex];
+	memset(szBlockHtml, 0, sizeof(szBlockHtml));
+	strcpy(szBlockHtml, "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"center\"><h1>");
+	strcat(szBlockHtml, pBlockItem->szBlockInfo);
+	strcat(szBlockHtml, "</h1></TD></TR></TABLE></body></html>\n");
+	
+	sprintf(szBlockHttpContent, 
+				"HTTP/1.1 200 OK\r\n"
+				"Content-Type: text/html; charset=utf-8\r\n"
+				"Content-Length: %d\r\n"
+				"Connection: close\r\n\r\n%s",
+				strlen(szBlockHtml), szBlockHtml);
+
+	uint32_t nBlockContentLen = strlen(szBlockHttpContent);
+	memcpy(szBlockBuffer + PACKET_HEADER_LEN, szBlockHttpContent, nBlockContentLen);
 
 	//memcpy(pRespEtherHdr->ether_shost, pEtherhead->ether_dhost, 6);
 	if (g_bIsExistMac)
@@ -360,7 +361,7 @@ int BlockHttpRequest(const char* pPacket)
 	pRespIpHdr->version = 4;
 	pRespIpHdr->daddr = pReqIphead->saddr;
 	pRespIpHdr->saddr = pReqIphead->daddr;
-	pRespIpHdr->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + g_nBlockBufferLen);
+	pRespIpHdr->tot_len = htons(sizeof(struct iphdr) + sizeof(struct tcphdr) + nBlockContentLen);
 	pRespIpHdr->tos = 0;
 	pRespIpHdr->ttl = 64;
 	swab((unsigned char*)&g_ipID, (unsigned char*)&pRespIpHdr->id, 2);
@@ -391,13 +392,13 @@ int BlockHttpRequest(const char* pPacket)
 	ph.dip = (uint32_t)(pReqIphead->saddr);
 	ph.zero = 0;
 	ph.protocol = 6;
-	ph.tcplen = htons((u_short)(sizeof(struct tcphdr) + g_nBlockBufferLen));
+	ph.tcplen = htons((u_short)(sizeof(struct tcphdr) + nBlockContentLen));
 
-	pRespTcpHdr->check = CalcTCPSum((uint16_t*)&ph, (uint16_t*)pRespTcpHdr, sizeof(struct tcphdr) + g_nBlockBufferLen);
+	pRespTcpHdr->check = CalcTCPSum((uint16_t*)&ph, (uint16_t*)pRespTcpHdr, sizeof(struct tcphdr) + nBlockContentLen);
 
 	if ((sendto(g_block_socket ,
-				(const char*)(g_szBlockBuffer), 
-				sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct tcphdr) + g_nBlockBufferLen, 
+				(const char*)(szBlockBuffer), 
+				sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct tcphdr) + nBlockContentLen, 
 				0,
 				(struct sockaddr *)&g_sa, 
 				sizeof(g_sa))) == -1)
@@ -414,10 +415,10 @@ int BlockHttpRequest(const char* pPacket)
 	}	
 
 	/* SENDING TCP RESET TO SERVER */
-/*	memset(g_szBlockBuffer, 0, PACKET_HEADER_LEN);
-	struct ether_header* pRstEtherHdr = (struct ether_header*)(g_szBlockBuffer);
-	struct iphdr*  pRstIpHdr = (struct iphdr*)(g_szBlockBuffer + sizeof(struct ether_header));
-	struct tcphdr* pRstTcpHdr	= (struct tcphdr*)(g_szBlockBuffer + sizeof(struct ether_header) + sizeof(struct iphdr));
+/*	memset(szBlockBuffer, 0, PACKET_HEADER_LEN);
+	struct ether_header* pRstEtherHdr = (struct ether_header*)(szBlockBuffer);
+	struct iphdr*  pRstIpHdr = (struct iphdr*)(szBlockBuffer + sizeof(struct ether_header));
+	struct tcphdr* pRstTcpHdr	= (struct tcphdr*)(szBlockBuffer + sizeof(struct ether_header) + sizeof(struct iphdr));
 
 	memcpy(pRstEtherHdr->ether_dhost, pEtherhead->ether_dhost, 6);
 	memcpy(pRstEtherHdr->ether_shost, pEtherhead->ether_shost, 6);
@@ -461,7 +462,7 @@ int BlockHttpRequest(const char* pPacket)
 	pRstTcpHdr->check = CalcTCPSum((uint16_t*)&ph, (uint16_t*)pRstTcpHdr, sizeof(struct tcphdr));
 
 	if ((sendto(g_block_socket ,
-				(const char*)(g_szBlockBuffer), 
+				(const char*)(szBlockBuffer), 
 				sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct tcphdr), 
 				0,
 				(struct sockaddr *)&g_sa, 

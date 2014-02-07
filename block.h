@@ -10,6 +10,7 @@ typedef struct BlockItem
 	int nServerID;			//Server ID saved in database
 	int nBlockMode;			//1:Block with Server IP 2:Block with Client IP
 	time_t nEndTime;   		//The end time for block
+	char szBlockInfo[1501];  
 } BlockItemDef;
 
 typedef struct BlockReq
@@ -19,6 +20,7 @@ typedef struct BlockReq
 	char szClientIp[24];
 	int nServerID;
 	int nServerIpLen;
+	char szBlockInfo[1501];
 }__attribute__((packed)) BlockReqDef;
 
 typedef struct PseudoHeader       /* pseudo header for TCP checksum calculations */
@@ -37,7 +39,7 @@ void CleanBlockData(BlockItemDef* pBlockItem);
 int FilterBlockList(const char* pPacket);
 int GetBlockItemCnt();
 int AddBlockData(const char* pRecvData);
-int BlockHttpRequest(const char* pPacket);
+int BlockHttpRequest(const char* pPacket, int nBlockItemIndex);
 unsigned short CalcIPSum(unsigned short * w, int blen);
 unsigned short CalcTCPSum(unsigned short *h, unsigned short * d, int dlen);
 
