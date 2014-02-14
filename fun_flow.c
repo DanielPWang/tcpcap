@@ -346,7 +346,7 @@ int GetFlowData(int nIndex, time_t tmNow, char **data)
 	sip.s_addr = nServerIp;
 	char szSip[16] = {0};
 
-	struct tm t;
+	struct tm t = {0};
 	char timebuf[30] = {0};
 	strftime(timebuf, sizeof(timebuf), "%F %T", localtime_r(&tmNow, &t));
 		

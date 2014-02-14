@@ -18,6 +18,10 @@ int AppendReponse(const char* packet, int bIsCurPack);
 void ShowOpLogInfo(int bIsPrintScreen);
 void StopHttpThread();
 
+void LogDropSessionData(const char *pszDropType, const struct tcp_session *pSession);
+void LogDataItems(const struct tcp_session *pSession, int nState, int nDataSize);
+
+
 
 
 #endif

@@ -778,7 +778,7 @@ int ProcessClientSockRes()
 	{
 		struct timeval tvAfterGet;
 		gettimeofday(&tvAfterGet, NULL);
-		g_nGetDataCostTime += (tvAfterGet.tv_sec-tvBeforGet.tv_sec)*1000000+(tvAfterGet.tv_usec-tvBeforGet.tv_usec);
+		g_nGetDataCostTime += ((uint64_t)tvAfterGet.tv_sec*1000000 + tvAfterGet.tv_usec) - ((uint64_t)tvBeforGet.tv_sec*1000000 + tvBeforGet.tv_usec);
 		g_nFlagGetData = 1;
 		g_nFlagSendData = 0;
 		
@@ -794,7 +794,7 @@ int ProcessClientSockRes()
 		
 		struct timeval tvAfterSend;
 		gettimeofday(&tvAfterSend, NULL);
-		g_nSendDataCostTime += (tvAfterSend.tv_sec-tvBeforSend.tv_sec)*1000000+(tvAfterSend.tv_usec-tvBeforSend.tv_usec);
+		g_nSendDataCostTime += ((uint64_t)tvAfterSend.tv_sec*1000000 + tvAfterSend.tv_usec) - ((uint64_t)tvBeforSend.tv_sec*1000000 + tvBeforSend.tv_usec);
 		free(data);
 		g_nFlagSendData = 1;
 
@@ -1046,7 +1046,7 @@ int LocalCacheFile()
 			gettimeofday(&tvBeforWrite, NULL);
 			nWriteRs = WriteNextCacheRecord(&g_fileWriter, pData, nDataLen);
 			gettimeofday(&tvAfterWrite, NULL);
-			g_nCacheDataCostTime += (tvAfterWrite.tv_sec-tvBeforWrite.tv_sec)*1000000+(tvAfterWrite.tv_usec-tvBeforWrite.tv_usec);
+			g_nCacheDataCostTime += ((uint64_t)tvAfterWrite.tv_sec*1000000 + tvAfterWrite.tv_usec) - ((uint64_t)tvBeforWrite.tv_sec*1000000 + tvBeforWrite.tv_usec);
 			free((void*)pData);
 			if (nWriteRs < 0) 
 			{

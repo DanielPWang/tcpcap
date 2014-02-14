@@ -109,18 +109,10 @@ int main(int argc, char* argv[])
 	CONFIG_PATH = conf_file;
 
 	// init log
-	{
-		char* tmp = calloc(1,1024);
-		ASSERT(tmp!=NULL);
-		char* logfile=tmp;
-		char* loglevel=tmp+1000;
-
-		GetValue(CONFIG_PATH, "logfile", logfile, 1000);
-		GetValue(CONFIG_PATH, "loglevel", loglevel, 24);
-		int nlevel = atoi(loglevel);
-		open_log(logfile, nlevel);
-		free(tmp);
-	}
+	char szLevel[10] = {0};
+	GetValue(CONFIG_PATH, "loglevel", szLevel, 3);
+	int nLevel = atoi(szLevel);
+	open_all_log(nLevel);
 
 	LOGFIX0("Start eru_agent...");
 		
@@ -240,7 +232,7 @@ int main(int argc, char* argv[])
 	StopHttpThread();
 	CloseCacheFile();
 	LOGFIX0("Exit eru_agent...");
-	close_log();
+	close_all_log();
 
 	return 0;
 }

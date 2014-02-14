@@ -405,6 +405,92 @@ int NewHttpSession(const char* packet)
 			//|| (strstr(pTmpContent, ".tif ") != NULL)
 			//|| (strstr(pTmpContent, ".tiff ") != NULL))
 		{
+			if (is_log_drop_data())
+			{
+				char sip[20] = {0}, dip[20] = {0};
+				char szUrlBody[1500] = {0};
+				char szUrl[1500] = {0};
+				inet_ntop(AF_INET, &iphead->saddr, sip, 20);
+				inet_ntop(AF_INET, &iphead->daddr, dip, 20);
+
+				int nStart = 5;
+				char *pszUrlStart = memmem(content, contentlen, "POST ", 5);
+				if (NULL == pszUrlStart)
+				{
+					pszUrlStart = memmem(content, contentlen, "GET ", 4);
+					nStart = 4;
+				}
+				
+				char *pszUrlEnd = memmem(content, contentlen, " HTTP/1.1", 9);
+				if (NULL == pszUrlEnd)
+					pszUrlEnd = memmem(content, contentlen, " HTTP/1.0", 9);
+
+				if ((pszUrlStart != NULL) && (pszUrlEnd != NULL))
+				{
+					int nUrlBodyLen = pszUrlEnd - pszUrlStart - nStart;
+					strncpy(szUrlBody, pszUrlStart+nStart, nUrlBodyLen);
+				}
+				
+				if (szUrlBody[0] != '\0')
+				{
+					if (strstr(szUrlBody, "http://") == NULL)
+					{
+						char *pszHost = memmem(content, contentlen, "Host: ", 6);
+						if (pszHost != NULL)
+						{
+							strcpy(szUrl, "Http://");
+							char *pszHostEnd = strstr(pszHost, "\r\n"); 
+							if (pszHostEnd != NULL)
+							{
+								int nHostLen = pszHostEnd - pszHost - 6;
+								strncat(szUrl, pszHost+6, nHostLen);
+							}
+						}
+
+						if (szUrl[0] != '\0')
+						{
+							strcat(szUrl, szUrlBody);
+						}
+						else
+						{
+							strcpy(szUrl, szUrlBody);
+						}
+					}
+					else
+					{
+						strcpy(szUrl, szUrlBody);
+					}
+				}
+
+				struct tm tm_tmp = {0};
+				char szCreateTime[50] = {0};
+				localtime_r(&tv->tv_sec, &tm_tmp);
+				sprintf(szCreateTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+						tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+						tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+						(int)(tv->tv_usec/1000));
+
+				memset(&tm_tmp, 0, sizeof(tm_tmp));
+				char szUpdateTime[50] = {0};
+				localtime_r(&tv->tv_sec, &tm_tmp);
+				sprintf(szUpdateTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+						tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+						tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+						(int)(tv->tv_usec/1000));
+
+				struct timeval tv_drop;
+				gettimeofday(&tv_drop, NULL);
+				char szDropTime[50] = {0};
+				memset(&tm_tmp, 0, sizeof(tm_tmp));
+				localtime_r(&tv_drop.tv_sec, &tm_tmp);
+				sprintf(szDropTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+						tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+						tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+						(int)(tv_drop.tv_usec/1000));
+				
+				LOG_DROP_DATA(sip, dip, "Drop Image", szCreateTime, szUpdateTime, szDropTime, szUrl);
+			}
+			
 			return -3;
 		}
 	}
@@ -444,13 +530,16 @@ int NewHttpSession(const char* packet)
 						index, pREQ->flag, pREQ->res1, pREQ->res2, 
 						pREQ->seq, pREQ->ack, tcphead->seq, tcphead->ack_seq, g_nReusedCount);
 
+				LogDropSessionData("Rebuild Failed:Channel Reuse", pREQ);
 				CleanHttpSession(pREQ);
 			} 
-			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout) 
+			else if (tv->tv_sec - pREQ->update.tv_sec > g_nHttpTimeout) 
 			{
 				++g_nTimeOutCount;
-				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
+				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
 				LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
+
+				LogDropSessionData("Rebuild Failed:Time Out", pREQ);
 				CleanHttpSession(pREQ);
 			} 
 			else 
@@ -470,7 +559,7 @@ int NewHttpSession(const char* packet)
 	pIDL->client.port = tcphead->source;
 	pIDL->server.port = tcphead->dest;
 	pIDL->create = *tv;
-	pIDL->update = tv->tv_sec;
+	pIDL->update = *tv;
 	pIDL->seq = tcphead->seq;
 	pIDL->ack = tcphead->ack_seq;
 	pIDL->data = (void*)packet;
@@ -547,7 +636,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				pSession->seq = tcphead->ack_seq;
 				pSession->ack = tcphead->seq;
 				pSession->res0 = contentlen;
-				pSession->update = tv->tv_sec;
+				pSession->update = *tv;
 				
 				return HTTP_APPEND_DROP_PACKET;
 			}
@@ -592,6 +681,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 					++g_nLaterPackIsMaxCount;
 					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u, g_nLaterPackIsMaxCount = %d", 
 							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, g_nLaterPackIsMaxCount);
+
+					LogDropSessionData("Rebuild Failed:Disorder Rebuild Failed", pSession);
 					CleanHttpSession(pSession);
 					
 					return HTTP_APPEND_DROP_PACKET;
@@ -624,7 +715,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	pSession->ack = tcphead->seq;
 	pSession->res0 = contentlen;
 	if (bIsCurPack)
-		pSession->update = tv->tv_sec;
+		pSession->update = *tv;
 
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
@@ -1081,7 +1172,7 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	pSession->ack = tcphead->ack_seq;
 	pSession->seq = tcphead->seq;
 	pSession->res0 = contentlen;
-	pSession->update = tv->tv_sec;
+	pSession->update = *tv;
 
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
@@ -1184,11 +1275,13 @@ int AppendReponse(const char* packet, int bIsCurPack)
 			continue;
 
 		// process timeout
-		if (tv->tv_sec-pREQ->update > g_nHttpTimeout) 
+		if (tv->tv_sec-pREQ->update.tv_sec > g_nHttpTimeout) 
 		{
 			++g_nTimeOutCount;
-			LOGWARN("One http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
+			LOGWARN("One http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
 			LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
+
+			LogDropSessionData("Rebuild Failed:Time Out", pREQ);
 			CleanHttpSession(pREQ);
 			continue;
 		}
@@ -1273,13 +1366,12 @@ void *HTTP_Thread(void* param)
 		unsigned *cmd = (unsigned*)content;
 		if (*cmd == _get_image || *cmd == _post_image) 
 		{
-			int nRes = 0;
-
 			if (_block_func_on && (GetBlockItemCnt() > 0))
 			{
-				if (FilterBlockList(packet))
+				int nIndex = FilterBlockList(packet);
+				if (nIndex != -1)
 				{
-					if (BlockHttpRequest(packet))
+					if (BlockHttpRequest(packet, nIndex))
 					{
 						struct in_addr sip; 
 						struct in_addr dip; 
@@ -1293,7 +1385,8 @@ void *HTTP_Thread(void* param)
 			
 			tcphead->seq = ntohl(tcphead->seq);
 			tcphead->ack_seq = ntohl(tcphead->ack_seq);
-			
+
+			int nRes = 0;
 			struct timeval *tv = (struct timeval*)packet;
 			gettimeofday(tv, NULL);
 			if ((nRes = NewHttpSession(packet)) < 0) 
@@ -1747,7 +1840,8 @@ int GetHttpData(char **data)
 	// get all http_content len
 	unsigned transfer_flag = pSession->transfer_flag;
 	void* packet = pSession->data;
-	do {
+	do 
+	{
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
@@ -1766,7 +1860,8 @@ int GetHttpData(char **data)
 	
 	unsigned data_len = http_len+35+10+26+26+nPortOffsite+5+1;
 	char* http_content = (char*)calloc(1, data_len);
-	if (http_content == NULL) {
+	if (http_content == NULL) 
+	{
 		LOGERROR0("mallocing memory failed. will be retry");
 		return 0;
 	}
@@ -1774,7 +1869,7 @@ int GetHttpData(char **data)
 	size_t pos = 0;
 	char sip[20] = {0};
 	char sport[20] = {0};
-	struct tm _tm;
+	struct tm _tm = {0};
 	localtime_r(&pSession->create.tv_sec, &_tm);
 	sprintf(http_content, "VISIT_TIME=%04d-%02d-%02d %02d:%02d:%02d:%03d",
 			_tm.tm_year+1900, _tm.tm_mon+1, _tm.tm_mday,
@@ -1796,11 +1891,13 @@ int GetHttpData(char **data)
 	pos = 35+10+26+26+nPortOffsite+5;
 	
 	packet = pSession->data;
-	do {
+	do 
+	{
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
-		if (contentlen > RECV_BUFFER_LEN) {
+		if (contentlen > RECV_BUFFER_LEN) 
+		{
 			LOGERROR("Contentlen[%u] of packet is great than RECV_BUFFER_LEN[%u]", contentlen, RECV_BUFFER_LEN);
 			pSession->data = packet;
 			CleanHttpSession(pSession);
@@ -1859,6 +1956,8 @@ int GetHttpData(char **data)
 		++g_nContentErrorCount;
 		++g_nHttpNullCount;
 		LOGWARN("Fail to find http content! g_nContentErrorCount = %d, g_nHttpNullCount = %d", g_nContentErrorCount, g_nHttpNullCount);
+
+		LogDropSessionData("Content Error:Http Null", pSession);
 		CleanHttpSession(pSession);
 		free(http_content);
 		return 0;
@@ -1868,6 +1967,8 @@ int GetHttpData(char **data)
 		++g_nContentErrorCount;
 		++g_nDatalenErrorCount;
 		LOGWARN("Session[%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->index, HTTP_PRE, g_nContentErrorCount, g_nDatalenErrorCount);
+
+		LogDropSessionData("Content Error:Data Length Error", pSession);
 		CleanHttpSession(pSession);
 		free(http_content);
 		return 0;
@@ -1886,6 +1987,8 @@ int GetHttpData(char **data)
 		{
 			++g_nContentErrorCount;
 			++g_nHttpcodeErrorCount;
+
+			LogDropSessionData("Content Error:HTTP/1.1 Null", pSession);
 			LOGWARN("Session[%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->index, HTTP_PRE, g_nContentErrorCount, g_nHttpcodeErrorCount);
 			CleanHttpSession(pSession);
 			free(http_content);
@@ -2126,10 +2229,12 @@ int GetHttpData(char **data)
 			}
 		}
 NOZIP:
+		LogDataItems(pSession, nHttpcode, data_len);
+
 		CleanHttpSession(pSession);
 		*data = http_content;
 		LOGDEBUG("Session[%d] get data successfully!", pSession->index);
-		
+
 		return data_len;
 	}
 	else
@@ -2139,6 +2244,8 @@ NOZIP:
 		++g_nContentUnknownCount;
 		LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->index, g_nContentErrorCount, g_nContentUnknownCount);
 		LOGINFO("Session[%d] content is %s", pSession->index, HTTP_PRE);
+
+		LogDropSessionData("Rebuild Failed:Content Unknown", pSession);
 	}
 		
 	CleanHttpSession(pSession);
@@ -2146,3 +2253,177 @@ NOZIP:
 	return 0;
 }
 
+void LogDropSessionData(const char *pszDropType, const struct tcp_session *pSession)
+{
+	if (!is_log_drop_data())
+		return;
+	
+	if ((NULL == pszDropType) || (NULL == pSession))
+		return;
+	
+	char sip[20] = {0}, dip[20] = {0};
+	char szUrlBody[1500] = {0};
+	char szUrl[1500] = {0};
+	inet_ntop(AF_INET, &pSession->client.ip, sip, 20);
+	inet_ntop(AF_INET, &pSession->server.ip, dip, 20);
+	
+	int nStart = 5;
+	char *pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);
+	if (NULL == pszUrlStart)
+	{
+		pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "GET ", 4);
+		nStart = 4;
+	}
+	
+	char *pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.1", 9);
+	if (NULL == pszUrlEnd)
+		pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.0", 9);
+
+	if ((pszUrlStart != NULL) && (pszUrlEnd != NULL))
+	{
+		int nUrlBodyLen = pszUrlEnd - pszUrlStart - nStart;
+		strncpy(szUrlBody, pszUrlStart+nStart, nUrlBodyLen);
+	}
+
+	if (szUrlBody[0] != '\0')
+	{
+		if (strstr(szUrlBody, "http://") == NULL)
+		{
+			char *pszHost = memmem(pSession->request_head, pSession->request_head_len, "Host: ", 6);
+			if (pszHost != NULL)
+			{
+				strcpy(szUrl, "Http://");
+				char *pszHostEnd = strstr(pszHost, "\r\n");	
+				if (pszHostEnd != NULL)
+				{
+					int nHostLen = pszHostEnd - pszHost - 6;
+					strncat(szUrl, pszHost+6, nHostLen);
+				}
+			}
+
+			if (szUrl[0] != '\0')
+			{
+				strcat(szUrl, szUrlBody);
+			}
+			else
+			{
+				strcpy(szUrl, szUrlBody);
+			}
+		}
+		else
+		{
+			strcpy(szUrl, szUrlBody);
+		}
+	}
+	
+	struct tm tm_tmp = {0};
+	char szCreateTime[50] = {0};
+	localtime_r(&pSession->create.tv_sec, &tm_tmp);
+	sprintf(szCreateTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+			tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+			tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+			(int)(pSession->create.tv_usec/1000));
+
+	memset(&tm_tmp, 0, sizeof(tm_tmp));
+	char szUpdateTime[50] = {0};
+	localtime_r(&pSession->update.tv_sec, &tm_tmp);
+	sprintf(szUpdateTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+			tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+			tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+			(int)(pSession->update.tv_usec/1000));
+
+	struct timeval tv_drop;
+	gettimeofday(&tv_drop, NULL);
+	char szDropTime[50] = {0};
+	memset(&tm_tmp, 0, sizeof(tm_tmp));
+	localtime_r(&tv_drop.tv_sec, &tm_tmp);
+	sprintf(szDropTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+			tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+			tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+			(int)(tv_drop.tv_usec/1000));
+	
+	LOG_DROP_DATA(sip, dip, pszDropType, szCreateTime, szUpdateTime, szDropTime, szUrl);
+}
+
+void LogDataItems(const struct tcp_session *pSession, int nState, int nDataSize)
+{
+	if (!is_log_data_items())
+		return;
+	
+	if (NULL == pSession)
+		return;
+	
+	char sip[20] = {0}, dip[20] = {0};
+	char szUrlBody[1500] = {0};
+	char szUrl[1500] = {0};
+	inet_ntop(AF_INET, &pSession->client.ip, sip, 20);
+	inet_ntop(AF_INET, &pSession->server.ip, dip, 20);
+	
+	int nStart = 5;
+	char *pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);
+	if (NULL == pszUrlStart)
+	{
+		pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "GET ", 4);
+		nStart = 4;
+	}
+	
+	char *pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.1", 9);
+	if (NULL == pszUrlEnd)
+		pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.0", 9);
+
+	if ((pszUrlStart != NULL) && (pszUrlEnd != NULL))
+	{
+		int nUrlBodyLen = pszUrlEnd - pszUrlStart - nStart;
+		strncpy(szUrlBody, pszUrlStart+nStart, nUrlBodyLen);
+	}
+	
+	if (szUrlBody[0] != '\0')
+	{
+		if (strstr(szUrlBody, "http://") == NULL)
+		{
+			char *pszHost = memmem(pSession->request_head, pSession->request_head_len, "Host: ", 6);
+			if (pszHost != NULL)
+			{
+				strcpy(szUrl, "Http://");
+				char *pszHostEnd = strstr(pszHost, "\r\n"); 
+				if (pszHostEnd != NULL)
+				{
+					int nHostLen = pszHostEnd - pszHost - 6;
+					strncat(szUrl, pszHost+6, nHostLen);
+				}
+			}
+
+			if (szUrl[0] != '\0')
+			{
+				strcat(szUrl, szUrlBody);
+			}
+			else
+			{
+				strcpy(szUrl, szUrlBody);
+			}
+		}
+		else
+		{
+			strcpy(szUrl, szUrlBody);
+		}
+	}
+
+	struct tm tm_tmp = {0};
+	char szCreateTime[50] = {0};
+	localtime_r(&pSession->create.tv_sec, &tm_tmp);
+	sprintf(szCreateTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+			tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+			tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+			(int)(pSession->create.tv_usec/1000));
+
+	char szUpdateTime[50] = {0};
+	memset(&tm_tmp, 0, sizeof(tm_tmp));
+	localtime_r(&pSession->update.tv_sec, &tm_tmp);
+	sprintf(szUpdateTime, "%04d-%02d-%02d %02d:%02d:%02d.%03d",
+			tm_tmp.tm_year+1900, tm_tmp.tm_mon+1, tm_tmp.tm_mday,
+			tm_tmp.tm_hour, tm_tmp.tm_min, tm_tmp.tm_sec, 
+			(int)(pSession->update.tv_usec/1000));
+
+	int nUsedTime = ((uint64_t)pSession->update.tv_sec*1000 + pSession->update.tv_usec/1000) - ((uint64_t)pSession->create.tv_sec*1000 + pSession->create.tv_usec/1000);
+	LOG_DATA_ITEMS(sip, dip, szCreateTime, szUpdateTime, nUsedTime, nDataSize, nState, szUrl);
+}

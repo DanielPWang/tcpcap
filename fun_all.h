@@ -34,7 +34,7 @@ struct tcp_session
 	unsigned cur_content_len;
 	unsigned part_content_len;
 	struct timeval create;	// first
-	time_t update;		// the lasttime update.
+	struct timeval update;		// the lasttime update.
 	void *data;
 	void *lastdata;
 	void *pack_later;

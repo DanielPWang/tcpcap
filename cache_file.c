@@ -65,7 +65,7 @@ int IsCacheFullDays(int nFullDays)
 	{
 		char szCurDate[11] = {0};
 		time_t now = time(NULL);
-		struct tm t;
+		struct tm t = {0};
 		strftime(szCurDate, sizeof(szCurDate), "%Y-%m-%d", localtime_r(&now, &t));
 		if (strcmp(szCurDate, szLatestDate) != 0)
 		{
@@ -216,7 +216,7 @@ int GetNewCacheFileName(char* pszFileName)
 	int nNum = 1;
 	char szCurDate[11] = {0};
 	time_t now = time(NULL);
-	struct tm t;
+	struct tm t = {0};
 	strftime(szCurDate, sizeof(szCurDate), "%Y-%m-%d", localtime_r(&now, &t));
     if (nCount > 0)
     {
@@ -318,7 +318,7 @@ int GetCacheFileForWrite(CacheFileDef* pCacheFile)
 	{
 		char szCurDate[11] = {0};
 		time_t now = time(NULL);
-		struct tm t;
+		struct tm t = {0};
 		strftime(szCurDate, sizeof(szCurDate), "%Y-%m-%d", localtime_r(&now, &t));
 
 		if (strncmp(szCurDate, pCacheFile->szFileName+4, 10) != 0)
