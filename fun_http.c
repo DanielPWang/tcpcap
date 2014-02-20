@@ -126,6 +126,8 @@ enum HTTP_CONTENT_TYPE {
 	HTTP_CONTENT_FILE_BIB,
 	HTTP_CONTENT_FILE_TXT,
 	HTTP_CONTENT_FILE_PDG,
+	HTTP_CONTENT_FILE_EXCEL,
+	HTTP_CONTENT_FILE_RTF,
 	HTTP_CONTENT_FILE_OTHER
 };
 
@@ -887,11 +889,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			}
 			else if (strncmp(content_type+14, "application/caj", 15) == 0)
 			{
-				char* pszFileType = memmem(content, contentlen, ".caj", 4);
-				if (pszFileType != NULL)
-					pSession->content_type = HTTP_CONTENT_FILE_CAJ;					
-				else
-					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+				pSession->content_type = HTTP_CONTENT_FILE_CAJ;					
 			}
 			else if (strncmp(content_type+14, "application/text", 16) == 0)
 			{
@@ -924,6 +922,22 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 					pSession->content_type = HTTP_CONTENT_FILE_TXT;					
 				else
 					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+			}
+			else if (strncmp(content_type+14, "text/trs", 8) == 0)
+			{
+				char* pszFileType = memmem(content, contentlen, ".txt", 4);
+				if (pszFileType != NULL)
+					pSession->content_type = HTTP_CONTENT_FILE_TXT;					
+				else
+					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
+			}
+			else if (strncmp(content_type+14, "application/rtf", 15) == 0)
+			{
+				pSession->content_type = HTTP_CONTENT_FILE_RTF;					
+			}
+			else if (strncmp(content_type+14, "application/ms-excel", 20) == 0)
+			{
+				pSession->content_type = HTTP_CONTENT_FILE_EXCEL;					
 			}
 		}
 		else if (pSession->content_type != HTTP_CONTENT_RES)
