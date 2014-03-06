@@ -328,9 +328,9 @@ int BlockHttpRequest(const char* pPacket, int nBlockItemIndex)
 	/* Create block buffer */
 	BlockItemDef *pBlockItem = &g_block_list[nBlockItemIndex];
 	memset(szBlockHtml, 0, sizeof(szBlockHtml));
-	strcpy(szBlockHtml, "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"center\"><h1>");
+	strcpy(szBlockHtml, "<html><head><title>ERU Block Page</title></head><body><TABLE height=\"100%\" width=\"100%\"><TR><TD align=\"left\" valign=\"top\"><FONT size=\"4\">");
 	strcat(szBlockHtml, pBlockItem->szBlockInfo);
-	strcat(szBlockHtml, "</h1></TD></TR></TABLE></body></html>\n");
+	strcat(szBlockHtml, "</FONT></TD></TR></TABLE></body></html>\n");
 	
 	sprintf(szBlockHttpContent, 
 				"HTTP/1.1 200 OK\r\n"
