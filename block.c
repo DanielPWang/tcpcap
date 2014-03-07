@@ -158,7 +158,7 @@ int AddBlockData(const char* pRecvData)
 			{
 				if (pReq->nServerID == pBlockItem->nServerID)
 				{
-					pBlockItem->nEndTime = time(NULL) + pReq->nTimeLong;
+					//pBlockItem->nEndTime = time(NULL) + pReq->nTimeLong;
 					nRs = 1;
 					break;
 				}
@@ -168,7 +168,7 @@ int AddBlockData(const char* pRecvData)
 				if ((tmpClientIp.s_addr == pBlockItem->hClient.ip.s_addr) 
 					 && (pReq->nServerID == pBlockItem->nServerID))
 				{
-					pBlockItem->nEndTime = time(NULL) + pReq->nTimeLong;
+					//pBlockItem->nEndTime = time(NULL) + pReq->nTimeLong;
 					nRs = 1;
 					break;
 				}

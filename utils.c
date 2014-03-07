@@ -679,8 +679,9 @@ void CheckLogFullDays(const char *pszFolder, int nFullDays)
 	if (nDays >= nFullDays)
 	{
 		char szDelFile[512] = {0};
-		sprintf(szDelFile, "%s%s*.log", pszFolder, szFirstDate);
-		unlink(szDelFile);
+		sprintf(szDelFile, "rm %s%s*.log", pszFolder, szFirstDate);
+		//unlink(szDelFile);
+		system(szDelFile);
 	}
 }
 
