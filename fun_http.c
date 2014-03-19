@@ -65,6 +65,7 @@ static int g_nSessionCount = 0;
 static int g_nMaxUsedPackSize = 0;
 static int g_nMaxUsedSessionSize = 0;
 static int g_bIsCapRes = 0;
+static int g_bIsSendTimeoutData = 0;
 
 static int g_nGzipCount = 0;
 static int g_nUnGzipFailCount = 0;
@@ -542,7 +543,18 @@ int NewHttpSession(const char* packet)
 				LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
 
 				LogDropSessionData("Rebuild Failed:Time Out", pREQ);
-				CleanHttpSession(pREQ);
+
+				if (!g_bIsSendTimeoutData)
+					CleanHttpSession(pREQ);
+				else
+				{
+					pREQ->flag = HTTP_SESSION_FINISH;
+					if (push_queue(_whole_content, pREQ) < 0)
+					{
+						++g_nCountWholeContentFull;
+						LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+					}
+				}
 			} 
 			else 
 			{
@@ -1296,7 +1308,19 @@ int AppendReponse(const char* packet, int bIsCurPack)
 			LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
 
 			LogDropSessionData("Rebuild Failed:Time Out", pREQ);
-			CleanHttpSession(pREQ);
+
+			if (!g_bIsSendTimeoutData)
+				CleanHttpSession(pREQ);
+			else
+			{
+				pREQ->flag = HTTP_SESSION_FINISH;
+				if (push_queue(_whole_content, pREQ) < 0)
+				{
+					++g_nCountWholeContentFull;
+					LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+				}
+			}
+			
 			continue;
 		}
 
@@ -1472,6 +1496,11 @@ int HttpInit()
 	GetValue(CONFIG_PATH, "cap_res", szCapRes, 6);
 	if (strcmp(szCapRes, "true") == 0)
 		g_bIsCapRes = 1;
+
+	char szSendTimeoutData[10] = {0};
+	GetValue(CONFIG_PATH, "send_timeout_data", szSendTimeoutData, 6);
+	if (strcmp(szSendTimeoutData, "true") == 0)
+		g_bIsSendTimeoutData = 1;
 	
 	g_nMaxHttpSessionCount = atoi(szMaxSessionCount);
 	if (g_nMaxHttpSessionCount < 50 || g_nMaxHttpSessionCount > 100000)

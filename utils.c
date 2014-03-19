@@ -185,6 +185,11 @@ int open_log(int nLevel, const char *pszFolder, LogFileDef *pLogFile)
 		
 	pLogFile->nLevel = nLevel;
 
+	char szFileSize[10] = {0};
+	GetValue(CONFIG_PATH, "log_file_size", szFileSize, 7);
+	int nFileSize = atoi(szFileSize);
+	pLogFile->nMaxSize = ((nFileSize < 10) || (nFileSize > 1024)) ? LOG_LENGTH_MAX : (nFileSize * 1024 * 1024);
+	
 	char szLogFilePath[100] = {0};
 	strcpy(pLogFile->szFileName, pszFolder);
 
@@ -408,7 +413,7 @@ int logmsg(int level, const char* fmt, ... )
 	
 	va_end(ap);
 
-	if (ftell(g_fileLog.pFile) >= LOG_LENGTH_MAX) 
+	if (ftell(g_fileLog.pFile) >= g_fileLog.nMaxSize) 
 	{
 		char szHM[5] = {0};
 		memset(&t, 0, sizeof(t));
@@ -500,7 +505,7 @@ int log_drop_data(const char* fmt, ... )
 	
 	va_end(ap);
 
-	if (ftell(g_fileDropDataLog.pFile) >= LOG_LENGTH_MAX) 
+	if (ftell(g_fileDropDataLog.pFile) >= g_fileDropDataLog.nMaxSize) 
 	{
 		char szHM[5] = {0};
 		memset(&t, 0, sizeof(t));
@@ -592,7 +597,7 @@ int log_data_items(const char* fmt, ... )
 	
 	va_end(ap);
 
-	if (ftell(g_fileDataItemsLog.pFile) >= LOG_LENGTH_MAX) 
+	if (ftell(g_fileDataItemsLog.pFile) >= g_fileDataItemsLog.nMaxSize) 
 	{
 		char szHM[5] = {0};
 		memset(&t, 0, sizeof(t));

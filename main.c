@@ -190,16 +190,6 @@ int main(int argc, char* argv[])
 			{
 				struct iphdr *iphead = IPHDR(buffer);
 
-				/*
-				struct in_addr sip; 
-				struct in_addr dip; 
-		
-				sip.s_addr = iphead->saddr;
-				dip.s_addr = iphead->daddr;
-				char ssip[16], sdip[16];
-				fprintf(stderr, "%s => %s \n", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
-				*/
-				
 				// Flow filter
 				if (_net_flow_func_on)
 					FilterPacketForFlow(iphead);

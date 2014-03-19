@@ -26,6 +26,7 @@ typedef struct LogFile
 	int nLevel;
 	FILE* pFile;
 	time_t tmPre;
+	int nMaxSize;
 	char szCurDate[11];
 	char szFileName[1024];
 } LogFileDef;
