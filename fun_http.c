@@ -22,10 +22,14 @@
 #include <block.h>
 
 static volatile int _runing = 1;
-static pthread_t _http_thread;
+static pthread_t _http_thread[10];
+static int _thread_param[10] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
+uint32_t g_nThreadCount = 1;
 struct hosts_t *_monitor_hosts = NULL;
 size_t _monitor_hosts_count = 0;
+struct hosts_t **_monitor_hosts_array = NULL;
+uint32_t g_nMonitorHostsPieceCount = 0;
 
 struct hosts_t *_exclude_hosts = NULL;
 size_t _exclude_hosts_count = 0;
@@ -38,11 +42,11 @@ pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
 //static char**  _ignore_request = NULL;
 //static size_t _ignore_request_count = 0;
 
-static struct queue_t *_packets = NULL;
+static struct queue_t **_packets_array = NULL;
 
-static int g_nCountWholeContentFull = 0;
-static int g_nDropCountForPacketFull = 0;
-static int g_nDropCountForSessionFull = 0;
+static int g_nCountWholeContentFull[10] = {0};
+static int g_nDropCountForPacketFull[10] = {0};
+static int g_nDropCountForSessionFull[10] = {0};
 static int g_nDropCountForImage = 0;
 static int g_nTimeOutCount = 0;
 static int g_nReusedCount = 0;
@@ -56,22 +60,21 @@ static int g_nChunked = 0;
 static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
 static uint64_t g_nHttpLen = 0;
-static uint64_t g_nPushedPackCount = 0;
-static uint32_t g_nSessionFisrtTime = 0;
-static uint32_t g_nSessionLastTime = 0;
+static uint64_t g_nPushedPackCount[10] = {0};
+static uint64_t g_nSessionCostTime[10] = {0};
 uint64_t g_nSkippedPackCount = 0;
 
-static int g_nSessionCount = 0;
-static int g_nMaxUsedPackSize = 0;
-static int g_nMaxUsedSessionSize = 0;
+static int g_nSessionCount[10] = {0};
+static int g_nMaxUsedPackSize[10] = {0};
+static int g_nMaxUsedSessionSize[10] = {0};
 static int g_bIsCapRes = 0;
 static int g_bIsSendTimeoutData = 0;
 
 static int g_nGzipCount = 0;
 static int g_nUnGzipFailCount = 0;
 
-extern uint64_t g_nCapCount;
-extern uint64_t g_nCapSize;
+extern uint64_t g_nCapCount[MONITOR_COUNT];
+extern uint64_t g_nCapSize[MONITOR_COUNT];
 extern uint32_t g_nCapFisrtTime;
 extern uint32_t g_nCapLastTime;
 extern uint64_t g_nGetDataCostTime;
@@ -79,6 +82,8 @@ extern uint64_t g_nSendDataCostTime;
 extern uint64_t g_nCacheDataCostTime;
 extern int g_nSendDataCount;
 extern int g_nMaxCacheCount;
+extern InterfaceFdDef g_arrayActiveFd[MONITOR_COUNT];
+extern int _active_sock;
 
 static int g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 static int g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
@@ -86,14 +91,15 @@ static int g_nHttpTimeout = HTTP_TIMEOUT;
 
 static int g_nSendErrStateDataFlag = 1;
 
-static struct tcp_session* _http_session = NULL;	// a session = query + reponse
-static struct queue_t *_idl_session = NULL;			// all idl session
+static struct tcp_session **_http_session_array = NULL;	// a session = query + reponse
+static struct queue_t **_idl_session_array = NULL;			// all idl session
 static struct queue_t *_whole_content = NULL;		// http_session.flag = HTTP_SESSION_FINISH
 
 extern volatile int g_nFlagGetData;
 extern volatile int g_nFlagSendData;
 
 extern int _block_func_on;
+volatile int g_nFlagIpHostLock = 0;
 
 enum HTTP_SESSION_FLAGS { 
 	HTTP_SESSION_IDL, 
@@ -150,20 +156,32 @@ void ShowOpLogInfo(int bIsPrintScreen)
 {
 	static uint64_t nPreCapSize = 0;
 	static uint32_t nPreCapTime = 0;
+	static uint64_t nPreIfCapSize[MONITOR_COUNT] = {0};
 	uint64_t nIntervalCapSize = 0;
 	uint32_t nIntervalCostTime = 0;
-	int nCurSessionUsedCount = g_nMaxHttpSessionCount - len_queue(_idl_session);
+
+	uint64_t nCapCount = 0;
+	uint64_t nCapSize = 0;
+
+	for (int i = 0; i < _active_sock; i++)
+	{
+		nCapCount += g_nCapCount[i];
+		nCapSize += g_nCapSize[i];
+	}
+	
 	if (0 == nPreCapTime)
 	{
 		nIntervalCostTime = g_nCapLastTime - g_nCapFisrtTime;
-		nIntervalCapSize = g_nCapSize;
+		nIntervalCapSize = nCapSize;
 		nPreCapTime = g_nCapLastTime;
-		nPreCapSize = g_nCapSize;
+		nPreCapSize = nCapSize;
 	}
 	else
 	{
-		nIntervalCapSize = g_nCapSize - nPreCapSize;
+		nIntervalCapSize = nCapSize - nPreCapSize;
 		nIntervalCostTime = g_nCapLastTime - nPreCapTime;
+		nPreCapSize = nCapSize;
+		nPreCapTime  = g_nCapLastTime;
 	}
 	uint64_t nFlow = 0;
 	if (nIntervalCostTime != 0)
@@ -171,9 +189,54 @@ void ShowOpLogInfo(int bIsPrintScreen)
 		nFlow = nIntervalCapSize / (uint64_t)nIntervalCostTime;
 		nFlow = (nFlow*8) / (1024*1024);
 	}
+
+	uint64_t nPushedPackCount = 0;
+	int nDropCountForPacketFull = 0;
+	int nDropCountForSessionFull = 0;
+	int nSessionCount = 0;
+	int nMaxUsedSessionSize = 0;
+	int nMaxUsedPackSize = 0;
+	int nCurSessionUsedCount[10] = {0};
+	int nCurSessionUsedCountAll = 0;
+	uint64_t nSessionCostTime = 0;
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		nPushedPackCount += g_nPushedPackCount[i];
+		nDropCountForPacketFull += g_nDropCountForPacketFull[i];
+		nDropCountForSessionFull += g_nDropCountForSessionFull[i];
+		nSessionCount += g_nSessionCount[i];
+		nMaxUsedSessionSize += g_nMaxUsedSessionSize[i];
+		nMaxUsedPackSize += g_nMaxUsedPackSize[i];
+		nCurSessionUsedCount[i] = g_nMaxHttpSessionCount - len_queue(_idl_session_array[i]);
+		nCurSessionUsedCountAll += nCurSessionUsedCount[i];
+		nSessionCostTime += g_nSessionCostTime[i];
+			
+		LOGFIX("\n \
+		***线程%d数据: \n \
+		共过滤%llu个包入包队列 \n \
+		丢弃%d个包[包队列溢出] \n \
+		包队列使用最大值 = %d \n \
+		共创建%d会话 \n \
+		放弃创建%d个会话[会话溢出] \n \
+		会话队列使用最大值 = %d \n \
+		遗留%d个会话[当前会话队列中的会话数] \n \
+		会话处理耗时%llu毫秒 \n", 
+		i,
+		g_nPushedPackCount[i],
+		g_nDropCountForPacketFull[i],
+		g_nMaxUsedPackSize[i],
+		g_nSessionCount[i],
+		g_nDropCountForSessionFull[i],
+		g_nMaxUsedSessionSize[i],
+		nCurSessionUsedCount[i],
+		g_nSessionCostTime[i]/1000);
+	}
 	
 	LOGFIX("\n \
-		共抓取%llu个包[%llu字节] \n \
+		********** \n \
+		*数据汇总* \n \
+		********** \n \
+		共抓取%llu个包, %llu字节[当前%u秒] \n \
 		背景流量%llu Mbps[当前%u秒] \n \
 		共过滤%llu个包入包队列 \n \
 		共过滤丢弃%llu个包 \n \
@@ -194,43 +257,104 @@ void ShowOpLogInfo(int bIsPrintScreen)
 		弹出会话队列的会话内容总大小为%llu字节 \n \
 		共有%dGzip会话数据[其中%d个Gzip解压失败] \n \
 		\n \
-		包抓取总耗时%u秒 \n \
-		会话处理总耗时%u秒 \n \
+		采集器运行时长%u秒 \n \
+		会话处理总耗时%llu毫秒 \n \
 		获取Http数据处理总耗时%llu毫秒 \n \
 		发送Http数据处理总耗时%llu毫秒 \n \
 		本地缓存Http数据处理总耗时%llu毫秒 \n", 
-		g_nCapCount,
-		g_nCapSize,
+		nCapCount,
+		nCapSize,
+		nIntervalCostTime,
 		nFlow,
 		nIntervalCostTime,
-		g_nPushedPackCount,
+		nPushedPackCount,
 		g_nSkippedPackCount,
-		g_nDropCountForPacketFull, 
-		g_nMaxUsedPackSize,
-		g_nSessionCount,
-		g_nDropCountForSessionFull, 
+		nDropCountForPacketFull, 
+		nMaxUsedPackSize,
+		nSessionCount,
+		nDropCountForSessionFull, 
 		g_nDropCountForImage,
 		g_nTimeOutCount,
 		g_nReusedCount,
 		g_nLaterPackIsMaxCount,
 		g_nContentErrorCount, g_nContentUnknownCount, g_nHttpNullCount, g_nDatalenErrorCount, g_nHttpcodeErrorCount,
-		nCurSessionUsedCount,
+		nCurSessionUsedCountAll,
 		g_nSendDataCount,
 		g_nMaxCacheCount,
-		g_nMaxUsedSessionSize,
+		nMaxUsedSessionSize,
 		g_nHttpLen,
 		g_nGzipCount,
 		g_nUnGzipFailCount,
 		g_nCapLastTime - g_nCapFisrtTime,
-		g_nSessionLastTime - g_nSessionFisrtTime,
+		nSessionCostTime/1000,
 		g_nGetDataCostTime/1000,
 		g_nSendDataCostTime/1000,
 		g_nCacheDataCostTime/1000);
 
+	uint64_t nIfFlow[MONITOR_COUNT] = {0};
+	for (int i = 0; i < _active_sock; i++)
+	{
+		uint64_t nIfIntervalCapSize = 0;	
+
+		if (0 == nPreIfCapSize[i])
+		{
+			nIfIntervalCapSize = g_nCapSize[i];
+			nPreIfCapSize[i] = g_nCapSize[i];
+		}
+		else
+		{
+			nIfIntervalCapSize = g_nCapSize[i] - nPreIfCapSize[i];
+			nPreIfCapSize[i] = g_nCapSize[i];
+		}
+		
+		if (nIntervalCostTime != 0)
+		{
+			nIfFlow[i] = nIfIntervalCapSize / (uint64_t)nIntervalCostTime;
+			nIfFlow[i] = (nIfFlow[i]*8) / (1024*1024);
+		}
+
+		LOGFIX("\n \
+		***端口[%s]采集数据情况: \n \
+		抓取%llu个包, %llu字节[当前%u秒] \n \
+		背景流量%llu Mbps[当前%u秒] \n", 
+		g_arrayActiveFd[i].szInterface,
+		g_nCapCount[i],
+		g_nCapSize[i],
+		nIntervalCostTime,
+		nIfFlow[i],
+		nIntervalCostTime);	
+	}
+
 	if (bIsPrintScreen)
 	{
+		for (int i = 0; i < g_nThreadCount; i++)
+		{
+			printf("\n \
+			***线程%d数据: \n \
+			共过滤%llu个包入包队列 \n \
+			丢弃%d个包[包队列溢出] \n \
+			包队列使用最大值 = %d \n \
+			共创建%d会话 \n \
+			放弃创建%d个会话[会话溢出] \n \
+			会话队列使用最大值 = %d \n \
+			遗留%d个会话[当前会话队列中的会话数] \n \
+			会话处理耗时%llu毫秒 \n", 
+			i,
+			g_nPushedPackCount[i],
+			g_nDropCountForPacketFull[i],
+			g_nMaxUsedPackSize[i],
+			g_nSessionCount[i],
+			g_nDropCountForSessionFull[i],
+			g_nMaxUsedSessionSize[i],
+			nCurSessionUsedCount[i],
+			g_nSessionCostTime[i]/1000);
+		}
+		
 		printf("\n \
-			共抓取%llu个包[%llu字节] \n \
+			********** \n \
+			*数据汇总* \n \
+			********** \n \
+			共抓取%llu个包, %llu字节[当前%u秒] \n \
 			背景流量%llu Mbps[当前%u秒] \n \
 			共过滤%llu个包入包队列 \n \
 			共过滤丢弃%llu个包 \n \
@@ -251,38 +375,53 @@ void ShowOpLogInfo(int bIsPrintScreen)
 			弹出会话队列的会话内容总大小为%llu字节 \n \
 			共有%dGzip会话数据[其中%d个Gzip解压失败] \n \
 			\n \
-			包抓取总耗时%u秒 \n \
-			会话处理总耗时%u秒 \n \
+			采集器运行时长%u秒 \n \
+			会话处理总耗时%llu毫秒 \n \
 			获取Http数据处理总耗时%llu毫秒 \n \
 			发送Http数据处理总耗时%llu毫秒 \n \
 			本地缓存Http数据处理总耗时%llu毫秒 \n", 
-			g_nCapCount,
-			g_nCapSize,
+			nCapCount,
+			nCapSize,
+			nIntervalCostTime,
 			nFlow,
 			nIntervalCostTime,
-			g_nPushedPackCount,
+			nPushedPackCount,
 			g_nSkippedPackCount,
-			g_nDropCountForPacketFull, 
-			g_nMaxUsedPackSize,
-			g_nSessionCount,
-			g_nDropCountForSessionFull, 
+			nDropCountForPacketFull, 
+			nMaxUsedPackSize,
+			nSessionCount,
+			nDropCountForSessionFull, 
 			g_nDropCountForImage,
 			g_nTimeOutCount,
 			g_nReusedCount,
 			g_nLaterPackIsMaxCount,
 			g_nContentErrorCount, g_nContentUnknownCount, g_nHttpNullCount, g_nDatalenErrorCount, g_nHttpcodeErrorCount,
-			nCurSessionUsedCount,
+			nCurSessionUsedCountAll,
 			g_nSendDataCount,
 			g_nMaxCacheCount,
-			g_nMaxUsedSessionSize,
+			nMaxUsedSessionSize,
 			g_nHttpLen,
 			g_nGzipCount,
 			g_nUnGzipFailCount,
 			g_nCapLastTime - g_nCapFisrtTime,
-			g_nSessionLastTime - g_nSessionFisrtTime,
+			nSessionCostTime/1000,
 			g_nGetDataCostTime/1000,
 			g_nSendDataCostTime/1000,
 			g_nCacheDataCostTime/1000);
+
+		for (int i = 0; i < _active_sock; i++)
+		{
+			printf("\n \
+			***端口[%s]采集数据情况: \n \
+			抓取%llu个包, %llu字节[当前%u秒] \n \
+			背景流量%llu Mbps[当前%u秒] \n", 
+			g_arrayActiveFd[i].szInterface,
+			g_nCapCount[i],
+			g_nCapSize[i],
+			nIntervalCostTime,
+			nIfFlow[i],
+			nIntervalCostTime);	
+		}
 	}
 }
 
@@ -293,10 +432,11 @@ struct tcp_session* GetHttpSession(const struct iphdr* iphead, const struct tcph
 
 struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 {
-	LOGDEBUG("Session[%d] start clean!", pSession->index);
+	LOGDEBUG("Session[%d][%d] start clean!", pSession->thread_index, pSession->index);
 	
 	if (pSession->flag != HTTP_SESSION_IDL) 
 	{
+		unsigned thread_index = pSession->thread_index;
 		unsigned index = pSession->index;
 		void* packet = pSession->data;
 		while (packet!=NULL)
@@ -306,7 +446,7 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 			free(tmp);
 		}
 
-		LOGDEBUG("Session[%d] clean packet data successfully!", pSession->index);
+		LOGDEBUG("Session[%d][%d] clean packet data successfully!", pSession->thread_index, pSession->index);
 		
 		packet = pSession->pack_later;
 		while (packet!=NULL)
@@ -316,7 +456,7 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 			free(tmp);
 		}
 
-		LOGDEBUG("Session[%d] clean packet_later data successfully!", pSession->index);
+		LOGDEBUG("Session[%d][%d] clean packet_later data successfully!", pSession->thread_index, pSession->index);
 		
 		if (pSession->request_head!=NULL)
 		{
@@ -342,20 +482,21 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 			pSession->part_content = NULL;
 		}
 		
-		LOGDEBUG("Session[%d] clean request_head,response_head, cur_content and part_content successfully!", pSession->index);
+		LOGDEBUG("Session[%d][%d] clean request_head,response_head, cur_content and part_content successfully!", pSession->thread_index, pSession->index);
 		
 		memset(pSession, 0, sizeof(*pSession));
+		pSession->thread_index = thread_index;
 		pSession->index = index;
 		pSession->flag = HTTP_SESSION_IDL;
 		
-		push_queue(_idl_session, pSession);
+		push_queue(_idl_session_array[pSession->thread_index], pSession);
 	}
 
-	LOGDEBUG("Session[%d] end clean!", pSession->index);
+	LOGDEBUG("Session[%d][%d] end clean!", pSession->thread_index, pSession->index);
 	return pSession;
 }
 
-int NewHttpSession(const char* packet)
+int NewHttpSession(int nThreadIndex, const char* packet)
 {
 	struct timeval *tv = (struct timeval*)packet;
 	struct iphdr *iphead = IPHDR(packet);
@@ -397,16 +538,16 @@ int NewHttpSession(const char* packet)
 	
 	if (!g_bIsCapRes)
 	{
-		if ((strstr(pTmpContent, ".gif ") != NULL)
-			|| (strstr(pTmpContent, ".js ") != NULL)
-			|| (strstr(pTmpContent, ".js?") != NULL)
-			|| (strstr(pTmpContent, ".css ") != NULL)
-			|| (strstr(pTmpContent, ".jpg ") != NULL)
-			|| (strstr(pTmpContent, ".ico ") != NULL)
-			|| (strstr(pTmpContent, ".bmp ") != NULL)
-			|| (strstr(pTmpContent, ".png ") != NULL))
-			//|| (strstr(pTmpContent, ".tif ") != NULL)
-			//|| (strstr(pTmpContent, ".tiff ") != NULL))
+		if ((memmem(pTmpContent, contentlen, ".gif ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".js ", 4) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".js?", 4) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".css ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".jpg ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".ico ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".bmp ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".png ", 5) != NULL))
+			//|| (memmem(pTmpContent, contentlen, ".tif ", 5) != NULL)
+			//|| (memmem(pTmpContent, contentlen, ".tiff ", 6) != NULL))
 		{
 			if (is_log_drop_data())
 			{
@@ -499,16 +640,16 @@ int NewHttpSession(const char* packet)
 	}
 	else
 	{
-		if ((strstr(pTmpContent, ".gif ") != NULL)
-			|| (strstr(pTmpContent, ".js ") != NULL)
-			|| (strstr(pTmpContent, ".js?") != NULL)
-			|| (strstr(pTmpContent, ".css ") != NULL)
-			|| (strstr(pTmpContent, ".jpg ") != NULL)
-			|| (strstr(pTmpContent, ".ico ") != NULL)
-			|| (strstr(pTmpContent, ".bmp ") != NULL)
-			|| (strstr(pTmpContent, ".png ") != NULL))
-			//|| (strstr(pTmpContent, ".tif ") != NULL)
-			//|| (strstr(pTmpContent, ".tiff ") != NULL))
+		if ((memmem(pTmpContent, contentlen, ".gif ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".js ", 4) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".js?", 4) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".css ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".jpg ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".ico ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".bmp ", 5) != NULL)
+			|| (memmem(pTmpContent, contentlen, ".png ", 5) != NULL))
+			//|| (memmem(pTmpContent, contentlen, ".tif ", 5) != NULL)
+			//|| (memmem(pTmpContent, contentlen, ".tiff ", 6) != NULL))
 		{
 			init_content_type = HTTP_CONTENT_RES;
 		}
@@ -519,18 +660,18 @@ int NewHttpSession(const char* packet)
 	int index = 0;
 	for (; index < g_nMaxHttpSessionCount; ++index) 
 	{
-		if (_http_session[index].flag != HTTP_SESSION_IDL && 
-			_http_session[index].flag != HTTP_SESSION_FINISH) 
+		if (_http_session_array[nThreadIndex][index].flag != HTTP_SESSION_IDL && 
+			_http_session_array[nThreadIndex][index].flag != HTTP_SESSION_FINISH) 
 		{
-			struct tcp_session* pREQ = &_http_session[index];
+			struct tcp_session* pREQ = &_http_session_array[nThreadIndex][index];
 			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source 
 				&& pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest
 				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq) 
 			{ // client -> server be reuse.
 				++g_nReusedCount;
-				LOGWARN("session[%d] channel is reused. \n \ 
+				LOGWARN("session[%d][%d] channel is reused. \n \ 
 							flag=%d, res1=%u, res2=%u, session.seq=%u, session.ack=%u, iphead.seq=%u, iphead.ack=%u; g_nReusedCount=%d", 
-						index, pREQ->flag, pREQ->res1, pREQ->res2, 
+						nThreadIndex, index, pREQ->flag, pREQ->res1, pREQ->res2, 
 						pREQ->seq, pREQ->ack, tcphead->seq, tcphead->ack_seq, g_nReusedCount);
 
 				LogDropSessionData("Rebuild Failed:Channel Reuse", pREQ);
@@ -540,7 +681,7 @@ int NewHttpSession(const char* packet)
 			{
 				++g_nTimeOutCount;
 				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
-				LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
+				LOGINFO("Timeout Session[%d][%d] Request Head Content = %s", nThreadIndex, index, pREQ->request_head);
 
 				LogDropSessionData("Rebuild Failed:Time Out", pREQ);
 
@@ -551,8 +692,8 @@ int NewHttpSession(const char* packet)
 					pREQ->flag = HTTP_SESSION_FINISH;
 					if (push_queue(_whole_content, pREQ) < 0)
 					{
-						++g_nCountWholeContentFull;
-						LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+						++g_nCountWholeContentFull[nThreadIndex];
+						LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 					}
 				}
 			} 
@@ -563,7 +704,7 @@ int NewHttpSession(const char* packet)
 		}
 	}
 
-	pIDL = (struct tcp_session*)pop_queue(_idl_session);
+	pIDL = (struct tcp_session*)pop_queue(_idl_session_array[nThreadIndex]);
 	if (pIDL == NULL) 
 		return -2;
 
@@ -605,21 +746,21 @@ int NewHttpSession(const char* packet)
 	memcpy(pIDL->request_head, content, contentlen);
 	pIDL->request_head_len = contentlen+1;
 		
-	LOGDEBUG("Session[%d]Start request in NewHttpSession, content= %s", pIDL->index, content);
+	LOGDEBUG("Session[%d][%d]Start request in NewHttpSession, content= %s", pIDL->thread_index, pIDL->index, content);
 
-	int nSessionSize = g_nMaxHttpSessionCount - len_queue(_idl_session);
-	if (nSessionSize > g_nMaxUsedSessionSize)
+	int nSessionSize = g_nMaxHttpSessionCount - len_queue(_idl_session_array[nThreadIndex]);
+	if (nSessionSize > g_nMaxUsedSessionSize[nThreadIndex])
 	{
-		g_nMaxUsedSessionSize = nSessionSize;
+		g_nMaxUsedSessionSize[nThreadIndex] = nSessionSize;
 	}
 
-	++g_nSessionCount;
-	LOGINFO("Current Session Count = %d , Max Used Session Buffer Size = %d !", g_nSessionCount, g_nMaxUsedSessionSize);	
+	++g_nSessionCount[nThreadIndex];
+	LOGINFO("Thread[%d]'s Current Session Count = %d , Max Used Session Buffer Size = %d !", nThreadIndex, g_nSessionCount[nThreadIndex], g_nMaxUsedSessionSize[nThreadIndex]);	
 
 	return index;
 }
 
-int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
+int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int bIsCurPack)
 { 
 	ASSERT(nIndex >= 0);
 	
@@ -628,23 +769,23 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	const char *content = (void*)tcphead + tcphead->doff*4;
-	struct tcp_session *pSession = &_http_session[nIndex];
+	struct tcp_session *pSession = &_http_session_array[nThreadIndex][nIndex];
 
 	// Check seq and ack. not fix.
 	if (pSession->seq != tcphead->ack_seq || (pSession->ack+pSession->res0) != tcphead->seq)
 	{ 
 		if (pSession->ack == tcphead->seq && (pSession->seq + pSession->res0) == tcphead->ack_seq)  // it's not woring on first time.
 		{
-			LOGDEBUG("S->C packet for first response. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+			LOGDEBUG("S->C packet for first response. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
+					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 			char *pszCode = memmem(content, contentlen, "HTTP/1.1 100", 12);
 			if (pszCode == NULL)
 				pszCode = memmem(content, contentlen, "HTTP/1.0 100", 12);
 
 			if (pszCode != NULL)
 			{
-				LOGWARN("Drop this packet for state 100 continue. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				LOGWARN("Drop this packet for state 100 continue. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
+							nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 
 				pSession->flag = HTTP_SESSION_REPONSEING;
 				pSession->seq = tcphead->ack_seq;
@@ -657,13 +798,13 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		}
 		else if (((pSession->ack + pSession->res0) == tcphead->seq) && (abs(tcphead->ack_seq - pSession->seq) <= 4380))
 		{
-			LOGDEBUG("Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+			LOGDEBUG("Session[%d][%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 
 			if ((*(unsigned*)content == _http_image) && (pSession->transfer_flag != HTTP_TRANSFER_INIT))
 			{
-				LOGWARN("Drop this packet for response repeatly. Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				LOGWARN("Drop this packet for response repeatly. Session[%d][%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 				
 				return HTTP_APPEND_DROP_PACKET;
 			}
@@ -685,16 +826,16 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 					pSession->last_pack_later = (void*)pPacket;
 					pSession->later_pack_size++;
 
-					LOGDEBUG("This packet is later packet for S->C wrong order. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+					LOGDEBUG("This packet is later packet for S->C wrong order. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
+							nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 
 					return HTTP_APPEND_ADD_PACKET_LATER;
 				}
 				else
 				{
 					++g_nLaterPackIsMaxCount;
-					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u, g_nLaterPackIsMaxCount = %d", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, g_nLaterPackIsMaxCount);
+					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u, g_nLaterPackIsMaxCount = %d", 
+							nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, g_nLaterPackIsMaxCount);
 
 					LogDropSessionData("Rebuild Failed:Disorder Rebuild Failed", pSession);
 					CleanHttpSession(pSession);
@@ -711,8 +852,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 					return HTTP_APPEND_ADD_PACKET_LATER;
 				}
 				
-				LOGDEBUG("Drop this packet for S->C wrong order. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-						nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				LOGDEBUG("Drop this packet for S->C wrong order. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
+						nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 				
 				return HTTP_APPEND_DROP_PACKET;
 			}
@@ -720,8 +861,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	}
 	else
 	{
-		LOGDEBUG("Session[%d] S->C packet. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+		LOGDEBUG("Session[%d][%d] S->C packet. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 	}
 	
 	pSession->flag = HTTP_SESSION_REPONSEING;
@@ -751,16 +892,16 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		}
 		else
 		{
-			LOGDEBUG("Session[%d] response head is not enough, continue to generate. content= %s",
-				nIndex, content);
+			LOGDEBUG("Session[%d][%d] response head is not enough, continue to generate. content= %s",
+				nThreadIndex, nIndex, content);
 		}
 	} 
 	else 
 	{
 		if ((HTTP_TRANSFER_INIT == pSession->transfer_flag) && (NULL != pSession->response_head))
 		{
-			LOGDEBUG("Session[%d] the next response contentlen=%d, content= %s",
-				nIndex, contentlen, content);
+			LOGDEBUG("Session[%d][%d] the next response contentlen=%d, content= %s",
+				nThreadIndex, nIndex, contentlen, content);
 			int last_len = pSession->response_head_len;
 			pSession->response_head = realloc(pSession->response_head, last_len + contentlen);
 			memcpy(pSession->response_head+last_len-1, content, contentlen);
@@ -772,21 +913,21 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			if ((memmem(content, contentlen, "\r\n\r\n", 4) != NULL)
 				|| (3 == pSession->response_head_gen_time))
 			{
-				LOGDEBUG("Session[%d] response head generate successfully. content= %s",
-					nIndex, content);
+				LOGDEBUG("Session[%d][%d] response head generate successfully. content= %s",
+					nThreadIndex, nIndex, content);
 				
 				pSession->response_head_recv_flag = 1;
 			}
 			else
 			{
-				LOGDEBUG("Session[%d] response head is not enough, continue to generate. content= %s",
-					nIndex, content);
+				LOGDEBUG("Session[%d][%d] response head is not enough, continue to generate. content= %s",
+					nThreadIndex, nIndex, content);
 			}
 		}
 		else
 		{
 			pSession->res2 += contentlen;
-			LOGTRACE("Session[%d] part_reponse_len = %u/%u", nIndex, pSession->res2, pSession->res1);
+			LOGTRACE("Session[%d][%d] part_reponse_len = %u/%u", nThreadIndex, nIndex, pSession->res2, pSession->res1);
 		}
 	}
 
@@ -828,7 +969,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		pSession->response_head_recv_flag = 0;
 		pSession->transfer_flag = HTTP_TRANSFER_NONE;
 		strlwr(content);
-		LOGDEBUG("Session[%d] response head generate contentlen= %d, content= %s", nIndex, contentlen, content);
+		LOGDEBUG("Session[%d][%d] response head generate contentlen= %d, content= %s", nThreadIndex, nIndex, contentlen, content);
 		
 		char* content_encoding = memmem(content, contentlen, "content-encoding: gzip", 22);
 		if (content_encoding != NULL)
@@ -966,12 +1107,12 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				
 				if (pszCode != NULL)
 				{
-					LOGDEBUG("Session[%d]with html end, g_nHtmlEnd=%d content= %s", nIndex, ++g_nHtmlEnd, content);
+					LOGDEBUG("Session[%d][%d] with html end, g_nHtmlEnd=%d content= %s", nThreadIndex, nIndex, ++g_nHtmlEnd, content);
 					pSession->transfer_flag = HTTP_TRANSFER_WITH_HTML_END;
 				}
 				else
 				{
-					LOGDEBUG("Session[%d]with transfer none, g_nNone=%d content= %s", nIndex, ++g_nNone, content);
+					LOGDEBUG("Session[%d][%d] with transfer none, g_nNone=%d content= %s", nThreadIndex, nIndex, ++g_nNone, content);
 					pSession->transfer_flag = HTTP_TRANSFER_NONE;
 				}
 			}
@@ -993,8 +1134,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			{
 				pSession->transfer_flag = HTTP_TRANSFER_HAVE_CONTENT_LENGTH;
 				pSession->res1 = strtol(pszContentLen+15, &tmp, 10);
-				LOGDEBUG("Session[%d] Content-Length = %u, content = %s", nIndex, pSession->res1, content);
-				if ((tmp = strstr(content, "\r\n\r\n")) != NULL) 
+				LOGDEBUG("Session[%d][%d] Content-Length = %u, content = %s", nThreadIndex, nIndex, pSession->res1, content);
+				if ((tmp = memmem(content, contentlen, "\r\n\r\n", 4)) != NULL) 
 				{
 					pSession->res2 = contentlen - (tmp-content) - 4;
 				}
@@ -1006,7 +1147,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				if ((pszTE != NULL) && (pszChunked != NULL))
 				{
 					pSession->transfer_flag = HTTP_TRANSFER_CHUNKED;
-					LOGDEBUG("Session[%d]Transfer-Encoding: chunked, g_nChunked = %d content = %s", nIndex, ++g_nChunked, content);
+					LOGDEBUG("Session[%d][%d]Transfer-Encoding: chunked, g_nChunked = %d content = %s", nThreadIndex, nIndex, ++g_nChunked, content);
 				}
 				else
 				{
@@ -1016,13 +1157,13 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 					
 					if (pszCode != NULL)
 					{
-						LOGDEBUG("Session[%d]with html end, g_nHtmlEnd=%d content= %s", nIndex, ++g_nHtmlEnd, content);
+						LOGDEBUG("Session[%d][%d]with html end, g_nHtmlEnd=%d content= %s", nThreadIndex, nIndex, ++g_nHtmlEnd, content);
 						pSession->transfer_flag = HTTP_TRANSFER_WITH_HTML_END;
 
 					}
 					else
 					{
-						LOGDEBUG("Session[%d]with transfer none, g_nNone=%d content= %s", nIndex, ++g_nNone, content);
+						LOGDEBUG("Session[%d][%d]with transfer none, g_nNone=%d content= %s", nThreadIndex, nIndex, ++g_nNone, content);
 						pSession->transfer_flag = HTTP_TRANSFER_NONE;
 					}
 				}
@@ -1033,15 +1174,15 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		{
 			pSession->content_encoding_gzip = 0;
 			pSession->transfer_flag = HTTP_TRANSFER_FILE;
-			LOGDEBUG("Session[%d] content is file.", nIndex);
+			LOGDEBUG("Session[%d][%d] content is file.", nThreadIndex, nIndex);
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
 			
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
-				++g_nCountWholeContentFull;
-				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+				++g_nCountWholeContentFull[nThreadIndex];
+				LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
@@ -1049,17 +1190,17 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 
 		if (HTTP_TRANSFER_NONE == pSession->transfer_flag)
 		{
-			LOGDEBUG("Session[%d] content is others and not HTTP_TRANSFER_WITH_HTML_END.", nIndex);
+			LOGDEBUG("Session[%d][%d] content is others and not HTTP_TRANSFER_WITH_HTML_END.", nThreadIndex, nIndex);
 
 			if (HTTP_CONTENT_NONE == pSession->content_type)
 			{
-				LOGWARN("Session[%d] is content-type unknown; content is \n%s\n%s", 
-						 nIndex, pSession->request_head, content);
+				LOGWARN("Session[%d][%d] is content-type unknown; content is \n%s\n%s", 
+						 nThreadIndex, nIndex, pSession->request_head, content);
 			}
 			else
 			{
-				LOGINFO("Session[%d] is HTTP_TRANSFER_NONE but not HTTP_CONTENT_NONE; content is \n%s\n%s", 
-						 nIndex, pSession->request_head, content);
+				LOGINFO("Session[%d][%d] is HTTP_TRANSFER_NONE but not HTTP_CONTENT_NONE; content is \n%s\n%s", 
+						 nThreadIndex, nIndex, pSession->request_head, content);
 			}
 			
 			if (!bIsCurPack)
@@ -1068,8 +1209,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
-				++g_nCountWholeContentFull;
-				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+				++g_nCountWholeContentFull[nThreadIndex];
+				LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
@@ -1087,15 +1228,15 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	{
 		if (pSession->res2 >= pSession->res1) 
 		{
-			LOGDEBUG("Session[%d] end_reponse content-length/recv = %u/%u, content= %s", nIndex, pSession->res1, pSession->res2, content);
+			LOGDEBUG("Session[%d][%d] end_reponse content-length/recv = %u/%u, content= %s", nThreadIndex, nIndex, pSession->res1, pSession->res2, content);
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
 			
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
-				++g_nCountWholeContentFull;
-				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+				++g_nCountWholeContentFull[nThreadIndex];
+				LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
@@ -1109,15 +1250,15 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		
 		if (pszChunkedEnd != NULL)
 		{
-			LOGDEBUG("Session[%d]end_reponse with chunked data", nIndex);
+			LOGDEBUG("Session[%d][%d]end_reponse with chunked data", nThreadIndex, nIndex);
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
 			
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
-				++g_nCountWholeContentFull;
-				LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+				++g_nCountWholeContentFull[nThreadIndex];
+				LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 			}
 			
 			return HTTP_APPEND_FINISH_CURRENT;
@@ -1128,22 +1269,22 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		char *pszHtmlEnd = memmem(content, contentlen, "</html>", 7);
 		if (pszHtmlEnd != NULL)
 		{
-			LOGDEBUG("Session[%d] find </html>, content=%s", nIndex, content);
+			LOGDEBUG("Session[%d][%d] find </html>, content=%s", nThreadIndex, nIndex, content);
 			int nLeft = contentlen - (pszHtmlEnd-content+7);
 			if (((pszHtmlEnd-content+7) == contentlen)
 				|| ((nLeft >= 6) && (memmem(pszHtmlEnd+7, 6, "\r\n\r\n", 4) != NULL || memmem(pszHtmlEnd+7, 6, "\n\n", 2) != NULL))
 				|| (memmem(pszHtmlEnd+7, nLeft, "<", 1) == NULL
 					&& memmem(pszHtmlEnd+7, nLeft, ">", 1) == NULL))
 			{
-				LOGDEBUG("Session[%d]end_reponse with </html>, left length=%d", nIndex, nLeft);
+				LOGDEBUG("Session[%d][%d]end_reponse with </html>, left length=%d", nThreadIndex, nIndex, nLeft);
 				if (!bIsCurPack)
 					return HTTP_APPEND_FINISH_LATER;
 				
 				pSession->flag = HTTP_SESSION_FINISH;
 				if (push_queue(_whole_content, pSession) < 0)
 				{
-					++g_nCountWholeContentFull;
-					LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+					++g_nCountWholeContentFull[nThreadIndex];
+					LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 				}
 				
 				return HTTP_APPEND_FINISH_CURRENT;
@@ -1154,7 +1295,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	return HTTP_APPEND_ADD_PACKET;
 }
 
-int AppendClientToServer(int nIndex, const char* pPacket)
+int AppendClientToServer(int nThreadIndex, int nIndex, const char* pPacket)
 {
 	ASSERT(nIndex >= 0);
 	
@@ -1163,35 +1304,35 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	const char *content = (void*)tcphead + tcphead->doff*4;
-	struct tcp_session *pSession = &_http_session[nIndex];
+	struct tcp_session *pSession = &_http_session_array[nThreadIndex][nIndex];
 
 	if (pSession->flag != HTTP_SESSION_REQUESTING) 
 		LOGWARN("Resend request or post request. Current flag = %d", pSession->flag);
 
 	if ((pSession->seq+pSession->res0) != tcphead->seq || pSession->ack != tcphead->ack_seq) 
 	{
-		LOGWARN("Session[%d] C->S packet wrong order. pre.seq=%u pre.ack=%u "
+		LOGWARN("Session[%d][%d] C->S packet wrong order. pre.seq=%u pre.ack=%u "
 				"pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-				 nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				 nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 
 		if ((1 == contentlen) && (*content == '\0'))
 		{
-			LOGWARN("Session[%d] AppendClientToServer drop packet, wrong order, contentlen=1, content=empty!",  nIndex);
+			LOGWARN("Session[%d][%d] AppendClientToServer drop packet, wrong order, contentlen=1, content=empty!", nThreadIndex, nIndex);
 		}
 		else
 		{
 			pSession->request_head_len_valid_flag = 1;
 			pSession->seq += contentlen;
-			LOGWARN("Session[%d] AppendClientToServer drop packet, content!=empty!", nIndex);
+			LOGWARN("Session[%d][%d] AppendClientToServer drop packet, content!=empty!", nThreadIndex, nIndex);
 		}
 		return HTTP_APPEND_DROP_PACKET;
 	}
 
-	LOGINFO("Session[%d] AppendClientToServer content=%s", nIndex, content);
+	LOGINFO("Session[%d][%d] AppendClientToServer content=%s", nThreadIndex, nIndex, content);
 
 	if ((1 == contentlen) && (*content == '\0'))
 	{
-		LOGWARN("Session[%d] AppendClientToServer drop packet, contentlen=1, content=empty!", nIndex);
+		LOGWARN("Session[%d][%d] AppendClientToServer drop packet, contentlen=1, content=empty!", nThreadIndex, nIndex);
 		return HTTP_APPEND_DROP_PACKET;
 	}
 
@@ -1219,11 +1360,11 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	return HTTP_APPEND_ADD_PACKET;
 }
 
-int AppendLaterPacket(int nIndex)
+int AppendLaterPacket(int nThreadIndex, int nIndex)
 {
 	ASSERT(nIndex >= 0);
 	
-	struct tcp_session *pSession = &_http_session[nIndex];
+	struct tcp_session *pSession = &_http_session_array[nThreadIndex][nIndex];
 	void *pLaterPack = pSession->pack_later;
 	
 	if (pLaterPack != NULL)
@@ -1235,7 +1376,7 @@ int AppendLaterPacket(int nIndex)
 		{
 			pCurTmp = pLaterPack;
 			pLaterPack = *(void**)pLaterPack;
-			int nRs = AppendServerToClient(nIndex, pCurTmp, 0);
+			int nRs = AppendServerToClient(nThreadIndex, nIndex, pCurTmp, 0);
 			LOGDEBUG("Process later packet, ******** nRs=%d ******** index=%d", nRs, nIndex);
 			
 			if (nRs == HTTP_APPEND_DROP_PACKET 
@@ -1262,8 +1403,8 @@ int AppendLaterPacket(int nIndex)
 					pSession->flag = HTTP_SESSION_FINISH;
 					if (push_queue(_whole_content, pSession) < 0)
 					{
-						++g_nCountWholeContentFull;
-						LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+						++g_nCountWholeContentFull[nThreadIndex];
+						LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 					}
 					
 					break;
@@ -1286,17 +1427,17 @@ int AppendLaterPacket(int nIndex)
 	return 0;
 }
 
-int AppendReponse(const char* packet, int bIsCurPack)
+int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 {
 	struct timeval *tv = (struct timeval*)packet;
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead = TCPHDR(iphead);
-	struct tcp_session *pREQ = &_http_session[0];
+	struct tcp_session *pREQ = &_http_session_array[nThreadIndex][0];
 
 	int index = 0;
 	for (; index < g_nMaxHttpSessionCount; ++index) 
 	{
-		pREQ = &_http_session[index];
+		pREQ = &_http_session_array[nThreadIndex][index];
 		if (pREQ->flag == HTTP_SESSION_IDL || pREQ->flag == HTTP_SESSION_FINISH) 
 			continue;
 
@@ -1305,7 +1446,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		{
 			++g_nTimeOutCount;
 			LOGWARN("One http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
-			LOGINFO("Timeout Session[%d] Request Head Content = %s", index, pREQ->request_head);
+			LOGINFO("Timeout Session[%d][%d] Request Head Content = %s", nThreadIndex, index, pREQ->request_head);
 
 			LogDropSessionData("Rebuild Failed:Time Out", pREQ);
 
@@ -1316,8 +1457,8 @@ int AppendReponse(const char* packet, int bIsCurPack)
 				pREQ->flag = HTTP_SESSION_FINISH;
 				if (push_queue(_whole_content, pREQ) < 0)
 				{
-					++g_nCountWholeContentFull;
-					LOGWARN("Whole content queue is full. count = %d", g_nCountWholeContentFull);
+					++g_nCountWholeContentFull[nThreadIndex];
+					LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
 				}
 			}
 			
@@ -1328,10 +1469,10 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
 			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) // server -> client
 		{
-			nRs = AppendServerToClient(index, packet, bIsCurPack);
+			nRs = AppendServerToClient(nThreadIndex, index, packet, bIsCurPack);
 			if (nRs == HTTP_APPEND_ADD_PACKET || nRs == HTTP_APPEND_ADD_PACKET_LATER)
 			{
-				AppendLaterPacket(index);
+				AppendLaterPacket(nThreadIndex, index);
 			}
 			else if (nRs == HTTP_APPEND_DROP_PACKET)
 				return nRs;	
@@ -1341,7 +1482,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source // client -> server
 				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) 
 		{ 
-			nRs = AppendClientToServer(index, packet);
+			nRs = AppendClientToServer(nThreadIndex, index, packet);
 			if (nRs == HTTP_APPEND_DROP_PACKET)
 				return nRs;	
 			
@@ -1350,7 +1491,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		else 
 		{
 			char sip[20], dip[20], stip[20], dtip[20];
-			LOGTRACE("Session[%d] %s:%d => %s:%d. append %s:%d => %s:%d", index,
+			LOGTRACE("Session[%d][%d] %s:%d => %s:%d. append %s:%d => %s:%d", nThreadIndex, index,
 					inet_ntop(AF_INET, &pREQ->client.ip, sip, 20), ntohs(pREQ->client.port),
 					inet_ntop(AF_INET, &pREQ->server.ip, dip, 20), ntohs(pREQ->server.port),
 					inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
@@ -1360,7 +1501,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 	if (index == g_nMaxHttpSessionCount) 
 	{
 		char sip[20], dip[20], stip[20], dtip[20];
-		LOGTRACE("Session[%d]  append %s:%d => %s:%d", index,
+		LOGTRACE("Session[%d][%d]  append %s:%d => %s:%d", nThreadIndex, index,
 				inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
 				inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest));
 		
@@ -1372,25 +1513,21 @@ int AppendReponse(const char* packet, int bIsCurPack)
 
 void *HTTP_Thread(void* param)
 {
+	int nThreadIndex = *(int*)param;
 	while (_runing)
 	{
-		int nPackSize = len_queue(_packets);
-		if (nPackSize > g_nMaxUsedPackSize)
+		int nPackSize = len_queue(_packets_array[nThreadIndex]);
+		if (nPackSize > g_nMaxUsedPackSize[nThreadIndex])
 		{
-			g_nMaxUsedPackSize = nPackSize;
+			g_nMaxUsedPackSize[nThreadIndex] = nPackSize;
 		}
 		
-		const char* packet = pop_queue(_packets);
+		const char* packet = pop_queue(_packets_array[nThreadIndex]);
 		if (packet == NULL) {
 			usleep(50000);
 			continue;
 		}
 
-		if (0 == g_nSessionFisrtTime)
-			g_nSessionFisrtTime = time(NULL);
-		else
-			g_nSessionLastTime = time(NULL);
-		
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
@@ -1401,6 +1538,9 @@ void *HTTP_Thread(void* param)
 			continue; 
 		} 
 
+		struct timeval tvBeforProc;
+		gettimeofday(&tvBeforProc, NULL);
+		
 		unsigned *cmd = (unsigned*)content;
 		if (*cmd == _get_image || *cmd == _post_image) 
 		{
@@ -1427,7 +1567,7 @@ void *HTTP_Thread(void* param)
 			int nRes = 0;
 			struct timeval *tv = (struct timeval*)packet;
 			gettimeofday(tv, NULL);
-			if ((nRes = NewHttpSession(packet)) < 0) 
+			if ((nRes = NewHttpSession(nThreadIndex, packet)) < 0) 
 			{
 				if (nRes == -3) 
 				{
@@ -1443,9 +1583,9 @@ void *HTTP_Thread(void* param)
 					char *enter = strchr(content, '\r');
 					if (enter != NULL) 
 					{
-						++g_nDropCountForSessionFull;
+						++g_nDropCountForSessionFull[nThreadIndex];
 						*enter = '\0';
-						LOGWARN("_http_session is full. drop count = %d, drop content = %s", g_nDropCountForSessionFull, content);
+						LOGWARN("_http_session_array[%d] is full. drop count = %d, drop content = %s", nThreadIndex, g_nDropCountForSessionFull[nThreadIndex], content);
 						*enter = '\r';
 
 						LOGWARN("Current Send status: g_nFlagGetData = %d, g_nFlagSendData = %d", g_nFlagGetData, g_nFlagSendData);
@@ -1454,6 +1594,10 @@ void *HTTP_Thread(void* param)
 				free((void*)packet);
 			}
 
+			struct timeval tvAfterProc;
+			gettimeofday(&tvAfterProc, NULL);
+			g_nSessionCostTime[nThreadIndex] += ((uint64_t)tvAfterProc.tv_sec*1000000 + tvAfterProc.tv_usec) - ((uint64_t)tvBeforProc.tv_sec*1000000 + tvBeforProc.tv_usec);
+		
 			continue;
 		}
 
@@ -1462,23 +1606,33 @@ void *HTTP_Thread(void* param)
 		
 		struct timeval *tv = (struct timeval*)packet;
 		gettimeofday(tv, NULL);
-		int nIndex = AppendReponse(packet, 1);
+		int nIndex = AppendReponse(nThreadIndex, packet, 1);
 		if (nIndex == HTTP_APPEND_DROP_PACKET) 
 		{
 			LOGDEBUG0("cannt find request with reponse.");
 			free((void*)packet);
 		}
 
-		g_nSessionLastTime = time(NULL);
+		struct timeval tvAfterProc;
+		gettimeofday(&tvAfterProc, NULL);
+		g_nSessionCostTime[nThreadIndex] += ((uint64_t)tvAfterProc.tv_sec*1000000 + tvAfterProc.tv_usec) - ((uint64_t)tvBeforProc.tv_sec*1000000 + tvBeforProc.tv_usec);
 	}
 	return NULL;
 }
 
 int HttpInit()
 {
-	ASSERT(_packets == NULL);
-	ASSERT(_http_session == NULL);
+	ASSERT(_packets_array == NULL);
+	ASSERT(_http_session_array == NULL);
 
+	char szThreadCount[10] = {0};
+	GetValue(CONFIG_PATH, "thread_count", szThreadCount, 4);
+	g_nThreadCount = atoi(szThreadCount);
+	if (g_nThreadCount < 1 || g_nThreadCount > 10)
+		g_nThreadCount = 1;
+
+	printf("thread_count = %d\n", g_nThreadCount);
+	
 	LoadHttpConf(CONFIG_PATH);
 	
 	char szSendErrStateDataFlag[10] = {0};
@@ -1491,7 +1645,7 @@ int HttpInit()
 	GetValue(CONFIG_PATH, "max_session_count", szMaxSessionCount, 7);
 	GetValue(CONFIG_PATH, "max_packet_count", szMaxPacketCount, 7);
 	GetValue(CONFIG_PATH, "http_timeout", szHttpTimeout, 4);
-
+	
 	char szCapRes[10] = {0};
 	GetValue(CONFIG_PATH, "cap_res", szCapRes, 6);
 	if (strcmp(szCapRes, "true") == 0)
@@ -1517,56 +1671,91 @@ int HttpInit()
 	printf("max_http_session_count = %d\n", g_nMaxHttpSessionCount);
 	printf("max_http_packet_count = %d\n", g_nMaxHttpPacketCount);
 	printf("max_http_timeout = %d\n", g_nHttpTimeout);
+
+	_packets_array = (struct queue_t **)calloc(sizeof(struct queue_t*), g_nThreadCount);
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		_packets_array[i] = init_queue(g_nMaxHttpPacketCount);
+	}
+	ASSERT(_packets_array != NULL);
+
+	_http_session_array = (struct tcp_session**)calloc(sizeof(struct tcp_session*), g_nThreadCount);
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		_http_session_array[i] = (struct tcp_session*)calloc(sizeof(struct tcp_session), g_nMaxHttpSessionCount);
+	}
+	ASSERT(_http_session_array != NULL);
+
+	_idl_session_array = (struct queue_t **)calloc(sizeof(struct queue_t*), g_nThreadCount);
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		_idl_session_array[i] = init_queue(g_nMaxHttpSessionCount);
+		for (size_t index = 0; index < g_nMaxHttpSessionCount; ++index)
+		{
+			_http_session_array[i][index].thread_index = i;
+			_http_session_array[i][index].index = index;
+			push_queue(_idl_session_array[i], &_http_session_array[i][index]);
+		}
+	}
+	ASSERT(_idl_session_array != NULL);
 		
-	_packets = init_queue(g_nMaxHttpPacketCount);
-	ASSERT(_packets != NULL);
-	_http_session = calloc(sizeof(_http_session[0]), g_nMaxHttpSessionCount);
-	ASSERT(_http_session != NULL);
-	_whole_content = init_queue(g_nMaxHttpSessionCount);
+	_whole_content = init_queue(g_nMaxHttpSessionCount*g_nThreadCount);
 	ASSERT(_whole_content != NULL);
-	_idl_session = init_queue(g_nMaxHttpSessionCount);
-	ASSERT(_idl_session != NULL);
+
 	//_use_session = init_queue(g_nMaxHttpSessionCount);
 	//ASSERT(_use_session != NULL);
-
-	for (size_t index = 0; index < g_nMaxHttpSessionCount; ++index)
-	{
-		_http_session[index].index = index;
-		push_queue(_idl_session, &_http_session[index]);
-	}
-
-	int err = pthread_create(&_http_thread, NULL, &HTTP_Thread, NULL);
-	ASSERT(err==0);
 	
-	return _packets==NULL? -1:0;
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		int err = pthread_create(&_http_thread[i], NULL, &HTTP_Thread, &_thread_param[i]);
+		ASSERT(err==0);
+	}
+	
+	return _packets_array==NULL? -1:0;
 }
 
 void StopHttpThread()
 {
 	_runing = 0;
 	void* result;
-	pthread_join(_http_thread, &result);
-
-	for (int i = 0; i < g_nMaxHttpSessionCount; i++) 
+	for (int i = 0; i < g_nThreadCount; i++)
 	{
-		if (_http_session[i].flag != HTTP_SESSION_IDL) 
+		pthread_join(_http_thread[i], &result);
+	}
+
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		for (int j = 0; j < g_nMaxHttpSessionCount; j++) 
 		{
-			struct tcp_session* pSession = &_http_session[i];
-			CleanHttpSession(pSession);	
+			if (_http_session_array[i][j].flag != HTTP_SESSION_IDL) 
+			{
+				struct tcp_session* pSession = &_http_session_array[i][j];
+				CleanHttpSession(pSession);	
+			}
 		}
+		free(_http_session_array[i]);
 	}
-
+	free(_http_session_array);
+	
 	void* pPacket = NULL;
-	while ((pPacket = pop_queue(_packets)) != NULL)
+	for (int i = 0; i < g_nThreadCount; i++)
 	{
-		free(pPacket);
+		while ((pPacket = pop_queue(_packets_array[i])) != NULL)
+		{
+			free(pPacket);
+		}
+
+		destory_queue(_packets_array[i]);
 	}
+	free(_packets_array);
 	
-	free(_http_session);
-	destory_queue(_packets);
 	destory_queue(_whole_content);
-	destory_queue(_idl_session);
-	
+
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		destory_queue(_idl_session_array[i]);
+	}
+	free(_idl_session_array);
 }
 
 int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
@@ -1576,24 +1765,25 @@ int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr*
 	
 	const char *content = (const char *)tcphead + tcphead->doff*4;
 	unsigned *cmd = (unsigned*)content;
-
-	for (int npos = 0; npos < _monitor_hosts_count; npos++)
+	for (int i = 0; i < g_nThreadCount; i++)
 	{
-		struct hosts_t *tmp = &_monitor_hosts[npos];
-		if (0 == tmp->ip.s_addr)
-			continue;
-		
-		if (tmp->ip.s_addr==INADDR_BROADCAST 
-			&& (tmp->port==tcphead->source || tmp->port==tcphead->dest || tmp->port==0u))
-			return npos;
-
-		if ( (tmp->ip.s_addr==iphead->saddr && (tmp->port==tcphead->source || tmp->port==0u) && (*cmd != _get_image && *cmd != _post_image))
-			 || (tmp->ip.s_addr==iphead->daddr && (tmp->port==tcphead->dest || tmp->port==0u)))
+		for (int npos = 0; npos < g_nMonitorHostsPieceCount; npos++)
 		{
-			return npos;
+			struct hosts_t *tmp = &_monitor_hosts_array[i][npos];
+			if (0 == tmp->ip.s_addr)
+				continue;
+			
+			if (tmp->ip.s_addr==INADDR_BROADCAST 
+				&& (tmp->port==tcphead->source || tmp->port==tcphead->dest || tmp->port==0u))
+				return i;
+
+			if ( (tmp->ip.s_addr==iphead->saddr && (tmp->port==tcphead->source || tmp->port==0u) && (*cmd != _get_image && *cmd != _post_image))
+				 || (tmp->ip.s_addr==iphead->daddr && (tmp->port==tcphead->dest || tmp->port==0u)))
+			{
+				return i;
+			}
 		}
 	}
-
 	return -1;
 }
 
@@ -1624,13 +1814,13 @@ int inExcludeHosts(const char* buffer, const struct iphdr* iphead, const struct 
 	return -1;
 }
 
-int PushHttpPack(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
+int PushHttpPack(int nThreadIndex, const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
 {	
-	int err = push_queue(_packets, (const void*) buffer);
+	int err = push_queue(_packets_array[nThreadIndex], (const void*)buffer);
 	if (err < 0) 
 	{
-		++g_nDropCountForPacketFull;
-		LOGWARN("http_queue is full. drop the packets, drop count = %d", g_nDropCountForPacketFull);
+		++g_nDropCountForPacketFull[nThreadIndex];
+		LOGWARN("Thread[%d]'s http_queue is full. drop the packets, drop count = %d", nThreadIndex, g_nDropCountForPacketFull[nThreadIndex]);
 	}
 	return err;
 }
@@ -1640,9 +1830,12 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 {
 	int nRs = 0;
 
-	pthread_mutex_lock(&_host_ip_lock);
-	
-	if ((inHosts(buffer, iphead, tcphead) == -1) 
+	if (g_nFlagIpHostLock)
+		pthread_mutex_lock(&_host_ip_lock);
+
+	int nThreadIndex = 0;
+	nThreadIndex = inHosts(buffer, iphead, tcphead);
+	if ((nThreadIndex == -1) 
 		|| (inExcludeHosts(buffer, iphead, tcphead) != -1))
 	{
 		struct in_addr sip; 
@@ -1658,19 +1851,20 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 	}
 	else
 	{
-		if (PushHttpPack(buffer, iphead, tcphead) != -1)
-			g_nPushedPackCount++;
+		if (PushHttpPack(nThreadIndex, buffer, iphead, tcphead) != -1)
+			g_nPushedPackCount[nThreadIndex]++;
 		else
 			nRs = -1;
 
-		int nPackSize = len_queue(_packets);
-		if (nPackSize > g_nMaxUsedPackSize)
+		int nPackSize = len_queue(_packets_array[nThreadIndex]);
+		if (nPackSize > g_nMaxUsedPackSize[nThreadIndex])
 		{
-			g_nMaxUsedPackSize = nPackSize;
+			g_nMaxUsedPackSize[nThreadIndex] = nPackSize;
 		}
 	}
 
-	pthread_mutex_unlock(&_host_ip_lock);
+	if (g_nFlagIpHostLock)
+		pthread_mutex_unlock(&_host_ip_lock);
 	
 	return nRs;
 }
@@ -1719,11 +1913,33 @@ int LoadHttpConf(const char* filename)
 		_monitor_hosts_count = count_char(httphosts, '\n') + 1;
 		_monitor_hosts = (struct hosts_t *)calloc(sizeof(*_monitor_hosts), _monitor_hosts_count);
 
-		for(left=httphosts; ;left=NULL) {
+		for(left=httphosts; ;left=NULL) 
+		{
 			ipport = strtok_r(left, "\n", &right);
-			if (ipport==NULL) break;
+			if (ipport==NULL) 
+				break;
 			LOGFIX("monitor host %s", ipport);
-			if (str_ipp(ipport, &_monitor_hosts[n])) { ++n; }
+			if (str_ipp(ipport, &_monitor_hosts[n])) 
+				++n;
+		}
+
+		_monitor_hosts_array = (struct hosts_t **)calloc(sizeof(struct hosts_t*), g_nThreadCount);
+		g_nMonitorHostsPieceCount = _monitor_hosts_count/g_nThreadCount + _monitor_hosts_count%g_nThreadCount;
+		printf("g_nMonitorHostsPieceCount = %d\n", g_nMonitorHostsPieceCount);
+		for (int i = 0; i < g_nThreadCount; i++)
+		{
+			_monitor_hosts_array[i] = (struct hosts_t *)calloc(sizeof(struct hosts_t), g_nMonitorHostsPieceCount);
+		}
+		
+		int nArrayIndex = 0, nUnitIndex = 0;
+		for (int i = 0; i < _monitor_hosts_count; i++) 
+		{
+			_monitor_hosts_array[nArrayIndex++][nUnitIndex] = _monitor_hosts[i];
+			if (nArrayIndex%g_nThreadCount == 0)
+			{
+				nArrayIndex = 0;
+				nUnitIndex++;
+			}
 		}
 	}
 
@@ -1736,11 +1952,14 @@ int LoadHttpConf(const char* filename)
 		_exclude_hosts_count = count_char(excludehosts, '\n') + 1;
 		_exclude_hosts = (struct hosts_t *)calloc(sizeof(*_exclude_hosts), _exclude_hosts_count);
 
-		for(left=excludehosts; ;left=NULL) {
+		for (left=excludehosts; ;left=NULL) 
+		{
 			ipport = strtok_r(left, "\n", &right);
-			if (ipport==NULL) break;
+			if (ipport==NULL) 
+				break;
 			LOGFIX("exclude host %s", ipport);
-			if (str_ipp(ipport, &_exclude_hosts[n])) { ++n; }
+			if (str_ipp(ipport, &_exclude_hosts[n])) 
+				++n;
 		}
 	}
 
@@ -1877,6 +2096,7 @@ int GetHttpData(char **data)
 		return 0;
 	
 	size_t http_len = 0;
+	LOGWARN("pSession->flag = %d\n", pSession->flag);
 	ASSERT(pSession->flag == HTTP_SESSION_FINISH);
 	assert(pSession->data != NULL);
 
@@ -2009,7 +2229,7 @@ int GetHttpData(char **data)
 	if ((HTTP - http_content) >= data_len) {
 		++g_nContentErrorCount;
 		++g_nDatalenErrorCount;
-		LOGWARN("Session[%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->index, HTTP_PRE, g_nContentErrorCount, g_nDatalenErrorCount);
+		LOGWARN("Session[%d][%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->thread_index, pSession->index, HTTP_PRE, g_nContentErrorCount, g_nDatalenErrorCount);
 
 		LogDropSessionData("Content Error:Data Length Error", pSession);
 		CleanHttpSession(pSession);
@@ -2017,7 +2237,7 @@ int GetHttpData(char **data)
 		return 0;
 	}
 	
-	LOGDEBUG("Session[%d] ready to get data.", pSession->index);
+	LOGDEBUG("Session[%d][%d] ready to get data.", pSession->thread_index, pSession->index);
 	if ((pSession->content_type != HTTP_CONTENT_NONE)
 		|| (HTTP_TRANSFER_WITH_HTML_END == transfer_flag))
 	{
@@ -2032,7 +2252,7 @@ int GetHttpData(char **data)
 			++g_nHttpcodeErrorCount;
 
 			LogDropSessionData("Content Error:HTTP/1.1 Null", pSession);
-			LOGWARN("Session[%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->index, HTTP_PRE, g_nContentErrorCount, g_nHttpcodeErrorCount);
+			LOGWARN("Session[%d][%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->thread_index, pSession->index, HTTP_PRE, g_nContentErrorCount, g_nHttpcodeErrorCount);
 			CleanHttpSession(pSession);
 			free(http_content);
 			return 0;
@@ -2042,14 +2262,14 @@ int GetHttpData(char **data)
 		int nHttpcode = strtol(http_code, NULL, 10);
 		if ((0 == g_nSendErrStateDataFlag) && (nHttpcode >= 404))
 		{
-			LOGDEBUG("Session[%d] httpcode=%d, Do not send current content.", pSession->index, nHttpcode);
+			LOGDEBUG("Session[%d][%d] httpcode=%d, Do not send current content.", pSession->thread_index, pSession->index, nHttpcode);
 			CleanHttpSession(pSession);
 			free(http_content);
 			return 0;
 		}
 
 		sprintf(http_content+35, "STATE=%03d", nHttpcode);
-		LOGDEBUG("Session[%d] get data httpcode=%d, transfer_flag=%d", pSession->index, nHttpcode, transfer_flag);
+		LOGDEBUG("Session[%d][%d] get data httpcode=%d, transfer_flag=%d", pSession->thread_index, pSession->index, nHttpcode, transfer_flag);
 		
 		int nContentLength = 0;
 		if (HTTP_TRANSFER_CHUNKED == transfer_flag)
@@ -2057,7 +2277,7 @@ int GetHttpData(char **data)
 			char* pOldContent = strstr(HTTP, "\r\n\r\n");
 			if (pOldContent == NULL)
 			{
-				LOGWARN("Session[%d] with flag(HTTP_TRANSFER_CHUNKED) has not content, Current content= %s", pSession->index, HTTP_PRE);
+				LOGWARN("Session[%d][%d] with flag(HTTP_TRANSFER_CHUNKED) has not content, Current content= %s", pSession->thread_index, pSession->index, HTTP_PRE);
 				goto NOZIP;
 			}
 			pOldContent += 4;
@@ -2085,7 +2305,7 @@ int GetHttpData(char **data)
 					pTmpContent = strstr(pTmpContent, "\r\n\r\n");
 					if (pTmpContent == NULL)
 					{
-						LOGWARN("Session[%d] fail to get end of chunk data. nContentLength=%d", pSession->index, nContentLength);
+						LOGWARN("Session[%d][%d] fail to get end of chunk data. nContentLength=%d", pSession->thread_index, pSession->index, nContentLength);
 						nContentLength = 0;
 					}
 					
@@ -2093,7 +2313,7 @@ int GetHttpData(char **data)
 				}
 				else
 				{
-					LOGWARN("Session[%d] get chunk size < 0 nChunkLen=%d", pSession->index, nChunkLen);
+					LOGWARN("Session[%d][%d] get chunk size < 0 nChunkLen=%d", pSession->thread_index, pSession->index, nChunkLen);
 					nContentLength = 0;
 					break;
 				}
@@ -2103,7 +2323,7 @@ int GetHttpData(char **data)
 			if (pTmpContent >= http_content+data_len)
 			{
 				nContentLength = 0;
-				LOGERROR("Session[%d] fail to calculate the chunk size!", pSession->index);
+				LOGERROR("Session[%d][%d] fail to calculate the chunk size!", pSession->thread_index, pSession->index);
 			}
 				
 			if (nContentLength > 0)
@@ -2143,7 +2363,7 @@ int GetHttpData(char **data)
 			char* pTmpContent = strstr(HTTP, "\r\n\r\n");
 			if (pTmpContent == NULL)
 			{
-				LOGWARN("Session[%d] with flag(HTTP_TRANSFER_WITH_HTML_END) has not content, current content = %s", pSession->index, HTTP_PRE);
+				LOGWARN("Session[%d][%d] with flag(HTTP_TRANSFER_WITH_HTML_END) has not content, current content = %s", pSession->thread_index, pSession->index, HTTP_PRE);
 				goto NOZIP;
 			}
 			pTmpContent += 4;
@@ -2172,7 +2392,7 @@ int GetHttpData(char **data)
 			char* pOldContent = strstr(HTTP, "\r\n\r\n");
 			if (pOldContent == NULL)
 			{
-				LOGWARN("Session[%d] with flag(HTTP_TRANSFER_FILE) has not content, current content = %s", pSession->index, HTTP_PRE);
+				LOGWARN("Session[%d][%d] with flag(HTTP_TRANSFER_FILE) has not content, current content = %s", pSession->thread_index, pSession->index, HTTP_PRE);
 				goto NOZIP;
 			}
 			pOldContent += 4;
@@ -2216,23 +2436,23 @@ int GetHttpData(char **data)
 			nContentLength = data_len;
 		}
 
-		LOGDEBUG("Session[%d] get data nContentLength=%d", pSession->index, nContentLength);
+		LOGDEBUG("Session[%d][%d] get data nContentLength=%d", pSession->thread_index, pSession->index, nContentLength);
 		
 		if (nContentLength == 0) 
 		{
-			LOGWARN("Session[%d] has not content-Length or is 0, current content = %s", pSession->index, HTTP);
+			LOGWARN("Session[%d][%d] has not content-Length or is 0, current content = %s", pSession->thread_index, pSession->index, HTTP);
 			goto NOZIP;
 		}
 		
 		char* content = strstr(HTTP, "\r\n\r\n");
 		if (content == NULL)
 		{
-			LOGWARN("Session[%d] has not content, current content = %s", pSession->index, HTTP);
+			LOGWARN("Session[%d][%d] has not content, current content = %s", pSession->thread_index, pSession->index, HTTP);
 			goto NOZIP;
 		}
 		content += 4;
 
-		LOGDEBUG("Session[%d] content_encoding_gzip flag = %d", pSession->index, pSession->content_encoding_gzip);
+		LOGDEBUG("Session[%d][%d] content_encoding_gzip flag = %d", pSession->thread_index, pSession->index, pSession->content_encoding_gzip);
 		
 		// gzip Content-Encoding: gzip
 		if (1 == pSession->content_encoding_gzip) 
@@ -2267,7 +2487,7 @@ int GetHttpData(char **data)
 			else
 			{
 				++g_nUnGzipFailCount;
-				LOGWARN("Session[%d] fail to UnGzip! Gzip Session count=%d, UnGzip fail count=%d", pSession->index, g_nGzipCount, g_nUnGzipFailCount);
+				LOGWARN("Session[%d][%d] fail to UnGzip! Gzip Session count=%d, UnGzip fail count=%d", pSession->thread_index, pSession->index, g_nGzipCount, g_nUnGzipFailCount);
 				
 			}
 		}
@@ -2276,17 +2496,17 @@ NOZIP:
 
 		CleanHttpSession(pSession);
 		*data = http_content;
-		LOGDEBUG("Session[%d] get data successfully!", pSession->index);
+		LOGDEBUG("Session[%d][%d] get data successfully!", pSession->thread_index, pSession->index);
 
 		return data_len;
 	}
 	else
 	{
-		//LOGDEBUG("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
+		//LOGDEBUG("Session[%d][%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->thread_index, pSession->index);
 		++g_nContentErrorCount;
 		++g_nContentUnknownCount;
-		LOGWARN("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->index, g_nContentErrorCount, g_nContentUnknownCount);
-		LOGINFO("Session[%d] content is %s", pSession->index, HTTP_PRE);
+		LOGWARN("Session[%d][%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->thread_index, pSession->index, g_nContentErrorCount, g_nContentUnknownCount);
+		LOGINFO("Session[%d][%d] content is %s", pSession->thread_index, pSession->index, HTTP_PRE);
 
 		LogDropSessionData("Rebuild Failed:Content Unknown", pSession);
 	}

@@ -20,11 +20,15 @@
 #include <block.h>
 #include <cache_file.h>
 
+extern uint32_t g_nThreadCount;
 extern struct hosts_t *_monitor_hosts;
 extern size_t _monitor_hosts_count;
+extern struct hosts_t **_monitor_hosts_array;
+extern uint32_t g_nMonitorHostsPieceCount;
 extern struct hosts_t *_exclude_hosts;
 extern size_t _exclude_hosts_count;
 extern pthread_mutex_t _host_ip_lock;
+extern volatile int g_nFlagIpHostLock;
 
 static int _srv_socket = -1;
 static int _client_socket = -1;
@@ -38,7 +42,6 @@ extern int _block_func_on;
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
 static time_t _active = 0;
-static time_t _op_log_time = 0;
 
 volatile int g_nFlagGetData = 0;
 volatile int g_nFlagSendData = 0;
@@ -408,6 +411,8 @@ int ProcessReqSetIpList(const char *pRecvData)
 	char *left = NULL, *right = NULL, *ipport = NULL;
 	int n = 0;
 
+	g_nFlagIpHostLock = 1;
+	usleep(300000);
 	pthread_mutex_lock(&_host_ip_lock);
 	
 	nMonHostsLen = *(int*)pRecvData;
@@ -416,7 +421,14 @@ int ProcessReqSetIpList(const char *pRecvData)
 	{
 		free(_monitor_hosts);
 		_monitor_hosts = NULL;
-		_monitor_hosts_count = 0;	
+		_monitor_hosts_count = 0;
+
+		for (int i = 0; i < g_nThreadCount; i++)
+		{
+			free(_monitor_hosts_array[i]);
+		}
+		free(_monitor_hosts_array);
+		g_nMonitorHostsPieceCount = 0;
 	}
 	if (nMonHostsLen > 0)
 	{
@@ -435,6 +447,25 @@ int ProcessReqSetIpList(const char *pRecvData)
 			if (str_ipp(ipport, &_monitor_hosts[n])) 
 				++n;
 		}
+
+		_monitor_hosts_array = (struct hosts_t **)calloc(sizeof(struct hosts_t*), g_nThreadCount);
+		g_nMonitorHostsPieceCount = _monitor_hosts_count/g_nThreadCount + _monitor_hosts_count%g_nThreadCount;
+		for (int i = 0; i < g_nThreadCount; i++)
+		{
+			_monitor_hosts_array[i] = (struct hosts_t *)calloc(sizeof(struct hosts_t), g_nMonitorHostsPieceCount);
+		}
+		
+		int nArrayIndex = 0, nUnitIndex = 0;
+		for (int i = 0; i < _monitor_hosts_count; i++) 
+		{
+			_monitor_hosts_array[nArrayIndex++][nUnitIndex] = _monitor_hosts[i];
+			if (nArrayIndex%g_nThreadCount == 0)
+			{
+				nArrayIndex = 0;
+				nUnitIndex++;
+			}
+		}
+		
 		if (pMonHostsTmp != NULL)
 			free(pMonHostsTmp);
 	}
@@ -469,6 +500,7 @@ int ProcessReqSetIpList(const char *pRecvData)
 	}
 
 	pthread_mutex_unlock(&_host_ip_lock);
+	g_nFlagIpHostLock = 0;
 	
 	FILE *pFile = NULL;
 	pFile = fopen(HTTP_HOST_PATH_FILE, "w");
@@ -902,16 +934,9 @@ thread_start:
 	int retval = 0;
 	int max_socket = 0;
 	_active = time(NULL);
-	_op_log_time = time(NULL);
 	
 	while (_runing) 
 	{
-		if (time(NULL) - _op_log_time > LOG_OP_INTERVAL)
-		{
-			ShowOpLogInfo(0);
-			_op_log_time = time(NULL);
-		}
-		
 		FD_ZERO(&rfds);
 		tv.tv_sec = 0;
 		tv.tv_usec = SELECT_TIMEOUT;
@@ -1126,7 +1151,7 @@ int StartServer()
 	printf("cache_full_day = %d\n", g_nCacheDays);
 	printf("cache_file_size = %d MB\n", nCacheFileSize);
 		
-	int nerr = pthread_create(&_srv_thread, NULL, server_thread, NULL);
+	int nerr = pthread_create(&_srv_thread, NULL, &server_thread, NULL);
 	return nerr;
 }
 

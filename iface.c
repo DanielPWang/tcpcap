@@ -12,16 +12,19 @@
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 
+#include <iface.h>
 #include <utils.h>
 #include <define.h>
 #include <config.h>
 
-static int SockMonitor[MONITOR_COUNT] = {0};
-
 static int _epollfd = 0;
 static struct epoll_event _events[MONITOR_COUNT];
-static int _active_sock = 0;
+int _active_sock = 0;
+
+InterfaceFdDef g_arrayActiveFd[MONITOR_COUNT] = {0};
+static pthread_mutex_t _recvlock = PTHREAD_MUTEX_INITIALIZER;
 
 int get_iface_id(int fd, const char* device)
 {
@@ -94,23 +97,31 @@ int OpenMonitorDevs()
 	ASSERT(_epollfd!=-1);
 	struct epoll_event ev;
 
+	int nCurFd = 0;
 	char *left = value;
 	char *right = NULL;
-
 	for (; _active_sock<=MONITOR_COUNT ; left=NULL)
 	{
 		left = strtok_r(left, " ", &right);
-		if (left == NULL) break;
-		SockMonitor[_active_sock] = open_monitor(left, "");
-		if (SockMonitor[_active_sock] > 0) {
+		if (left == NULL) 
+			break;
+		
+		nCurFd = open_monitor(left, "");
+		if (nCurFd > 0) 
+		{
+			strcpy(g_arrayActiveFd[_active_sock].szInterface, left);
+			g_arrayActiveFd[_active_sock].nFd = nCurFd;
 			LOGINFO("open interface %s", left);
 			ev.events = EPOLLIN;
-			ev.data.fd = SockMonitor[_active_sock];
-			if (epoll_ctl(_epollfd, EPOLL_CTL_ADD, SockMonitor[_active_sock], &ev)==-1) {
+			ev.data.fd = g_arrayActiveFd[_active_sock].nFd;
+			if (epoll_ctl(_epollfd, EPOLL_CTL_ADD, g_arrayActiveFd[_active_sock].nFd, &ev)==-1) 
+			{
 				perror("[ERROR] ");
 			}
 			++_active_sock;
-		} else {
+		} 
+		else 
+		{
 			LOGINFO("cannt open interface %s", left);
 		}
 	}
@@ -118,29 +129,49 @@ int OpenMonitorDevs()
 	return _active_sock;
 }
 
-int CapturePacket(char* buffer, size_t size)
+int CapturePacket(char* buffer, size_t size, int *nFdIndex)
 {
 	assert(_epollfd > 0);
 	assert(_active_sock > 0);
 
+	pthread_mutex_lock(&_recvlock);
 	int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
-	if (nfds < 1 ) return 0;	// test exit.
-
+	if (nfds < 1) 
+	{
+		pthread_mutex_unlock(&_recvlock);
+		return 0;
+	}
+	
 	struct sockaddr_in sa;
 	size_t salen = sizeof(sa);
 
+	//pthread_mutex_lock(&_recvlock);
+
+	int nFd = _events[0].data.fd;
 	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0,
-			(struct sockaddr*)&sa, &salen);
+							(struct sockaddr*)&sa, &salen);
 
-	if (nRecv == -1) { return 0; }
+	pthread_mutex_unlock(&_recvlock);
 
+	if (nRecv == -1) 
+		return 0;
+
+	for (int i = 0; i < _active_sock; i++)
+	{
+		if (nFd == g_arrayActiveFd[i].nFd)
+		{
+			*nFdIndex = i;
+			break;
+		}
+	}
+	
 	return nRecv;
 }
 
 void CloseOpenMonitorDevs()
 {
 	for (; _active_sock>0; --_active_sock) {
-		if (epoll_ctl(_epollfd, EPOLL_CTL_DEL, SockMonitor[_active_sock-1], NULL) == -1) {
+		if (epoll_ctl(_epollfd, EPOLL_CTL_DEL, g_arrayActiveFd[_active_sock-1].nFd, NULL) == -1) {
 			perror("[ERROR] ");
 		}
 	}

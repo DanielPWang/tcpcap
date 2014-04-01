@@ -23,18 +23,19 @@
 #include "define.h"
 #include <block.h>
 
+static pthread_t _capture_thread[10];
 int SockManager;
-extern int SockMonitor[MONITOR_COUNT];
 volatile int Living = 1;
 volatile int NeedReloadConfig = 0;
 int _net_flow_func_on = 0;
 int _block_func_on = 0;
 
-uint64_t g_nCapCount = 0;
-uint64_t g_nCapSize = 0;
+uint64_t g_nCapCount[MONITOR_COUNT] = {0};
+uint64_t g_nCapSize[MONITOR_COUNT] = {0};
 uint32_t g_nCapFisrtTime = 0;
 uint32_t g_nCapLastTime = 0;
 extern uint64_t g_nSkippedPackCount;
+extern uint32_t g_nThreadCount;
 
 const char *MonitorFilter;
 const char* CONFIG_PATH;
@@ -74,6 +75,70 @@ void ShowUsage(int nExit)
 	printf("options:\n");
 	printf("    -v show version.\n");
 	exit(nExit);
+}
+
+void *capture_thread(void* param)
+{
+	char* buffer = NULL;
+	int nrecv = 0;
+	while (Living) 
+	{
+		buffer = calloc(1, RECV_BUFFER_LEN);
+		if (buffer == NULL)
+		{
+			sleep(1);
+			continue;
+		}
+
+		do 
+		{
+			int nFdIndex = -1;
+			nrecv = CapturePacket(buffer, RECV_BUFFER_LEN, &nFdIndex);
+			if (nrecv == 0) 
+				continue;
+
+			++g_nCapCount[nFdIndex];
+			g_nCapSize[nFdIndex] += nrecv;
+			
+			struct ether_header *ehead = (struct ether_header*)buffer;
+			u_short eth_type = ntohs(ehead->ether_type);
+			if (ETHERTYPE_VLAN == eth_type)
+			{
+				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
+				//LOGDEBUG("vlan packet, eth_type = %x", eth_type);
+				//fprintf(stderr, "vlan packet, eth_type = %x \n", eth_type);
+			}
+			
+			if (ETHERTYPE_IP == eth_type)
+			{
+				struct iphdr *iphead = IPHDR(buffer);
+
+				// Flow filter
+				if (_net_flow_func_on)
+					FilterPacketForFlow(iphead);
+
+				if (iphead->protocol == IPPROTO_TCP)
+				{
+					struct tcphdr *tcphead = TCPHDR(iphead);
+
+					// Http filter.
+					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
+						break;
+				}
+				else
+				{
+					g_nSkippedPackCount++;
+				}
+			}
+			else
+			{
+				g_nSkippedPackCount++;
+			}
+			memset(buffer, 0, RECV_BUFFER_LEN);
+		} while (Living);
+	}
+
+	return NULL;
 }
 
 int main(int argc, char* argv[])
@@ -149,76 +214,34 @@ int main(int argc, char* argv[])
 	if (_block_func_on)
 		InitBlockProc();
 
-	// capture and process
-	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);
-	int nrecv = 0;
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		int err = pthread_create(&_capture_thread[i], NULL, &capture_thread, NULL);
+		ASSERT(err==0);
+	}
 	
+	time_t op_log_time = time(NULL);
 	while (Living) 
 	{
-		buffer = calloc(1, RECV_BUFFER_LEN);
-		if (buffer == NULL)
+		if (0 == g_nCapFisrtTime)
+			g_nCapFisrtTime = time(NULL);
+		else
+			g_nCapLastTime = time(NULL);
+		
+		if (time(NULL) - op_log_time > LOG_OP_INTERVAL)
 		{
-			sleep(1);
-			continue;
+			ShowOpLogInfo(0);
+			op_log_time = time(NULL);
 		}
 
-		do 
-		{
-			nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
-			if (nrecv == 0) 
-				continue;
-
-			++g_nCapCount;
-			g_nCapSize += nrecv;
-			
-			if (0 == g_nCapFisrtTime)
-				g_nCapFisrtTime = time(NULL);
-			else
-				g_nCapLastTime = time(NULL);
-			
-					
-			struct ether_header *ehead = (struct ether_header*)buffer;
-			u_short eth_type = ntohs(ehead->ether_type);
-			if (ETHERTYPE_VLAN == eth_type)
-			{
-				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
-				//LOGDEBUG("vlan packet, eth_type = %x", eth_type);
-				//fprintf(stderr, "vlan packet, eth_type = %x \n", eth_type);
-			}
-			
-			if (ETHERTYPE_IP == eth_type)
-			{
-				struct iphdr *iphead = IPHDR(buffer);
-
-				// Flow filter
-				if (_net_flow_func_on)
-					FilterPacketForFlow(iphead);
-
-				if (iphead->protocol == IPPROTO_TCP)
-				{
-					struct tcphdr *tcphead = TCPHDR(iphead);
-
-					// Http filter.
-					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
-						break;
-				}
-				else
-				{
-					g_nSkippedPackCount++;
-				}
-			}
-			else
-			{
-				g_nSkippedPackCount++;
-			}
-			memset(buffer, 0, RECV_BUFFER_LEN);
-		} 
-		while (Living);
+		sleep(1);
 	}
 
 	ShowOpLogInfo(1);
 	LOGFIX0("Ready to exit...");
+	LOGFIX0("Stop Server Thread...");
 	StopServer();
+	LOGFIX0("Stop Http Thread...");
 	StopHttpThread();
 	CloseCacheFile();
 	LOGFIX0("Exit eru_agent...");

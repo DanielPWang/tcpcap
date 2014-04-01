@@ -26,6 +26,7 @@ struct tcp_session
 	unsigned res1;
 	unsigned res2;
 	unsigned later_pack_size;
+	unsigned thread_index;
 	unsigned index;
 	unsigned request_head_len;
 	unsigned request_head_len_valid_flag;

@@ -5,7 +5,7 @@
 #define VER_MINOR 2
 #define VER_PATCH 6
 
-#define MONITOR_COUNT 5
+#define MONITOR_COUNT 7
 
 // configure
 #define CONFIG_PATH_FILE "/config/agent.conf"
