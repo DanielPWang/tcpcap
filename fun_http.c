@@ -69,6 +69,15 @@ static int g_nMaxUsedPackSize[10] = {0};
 static int g_nMaxUsedSessionSize[10] = {0};
 static int g_bIsCapRes = 0;
 static int g_bIsSendTimeoutData = 0;
+static int g_bIsSendChannelReusedData = 0;
+static int g_bIsSendDisorderRebuildFailedData = 0;
+static int g_bIsSendUnknownData = 0;
+
+static int g_bIsLogResData = 0;
+static int g_bIsLogTimeoutData = 0;
+static int g_bIsLogChannelReusedData = 0;
+static int g_bIsLogDisorderRebuildFailedData = 0;
+static int g_bIsLogUnknownData = 0;
 
 static int g_nGzipCount = 0;
 static int g_nUnGzipFailCount = 0;
@@ -88,6 +97,7 @@ extern int _active_sock;
 static int g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 static int g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
 static int g_nHttpTimeout = HTTP_TIMEOUT;
+static char g_szSpecialClientIp[101] = {0};
 
 static int g_nSendErrStateDataFlag = 1;
 
@@ -100,51 +110,6 @@ extern volatile int g_nFlagSendData;
 
 extern int _block_func_on;
 volatile int g_nFlagIpHostLock = 0;
-
-enum HTTP_SESSION_FLAGS { 
-	HTTP_SESSION_IDL, 
-	HTTP_SESSION_REQUESTING,
-	HTTP_SESSION_REQUEST, 
-	HTTP_SESSION_REPONSE, 
-	HTTP_SESSION_REPONSEING,
-	HTTP_SESSION_FINISH, 
-	HTTP_SESSION_TIMEOUT 
-};
-
-enum HTTP_TRANSFER_FLAGS { 
-	HTTP_TRANSFER_INIT,
-	HTTP_TRANSFER_NONE,
-	HTTP_TRANSFER_HAVE_CONTENT_LENGTH, 
-	HTTP_TRANSFER_CHUNKED,
-	HTTP_TRANSFER_WITH_HTML_END,
-	HTTP_TRANSFER_FILE
-};
-
-enum HTTP_CONTENT_TYPE { 
-	HTTP_CONTENT_NONE,
-	HTTP_CONTENT_HTML,
-	HTTP_CONTENT_RES,
-	HTTP_CONTENT_FILE_PDF,
-	HTTP_CONTENT_FILE_KDH,
-	HTTP_CONTENT_FILE_CEB,
-	HTTP_CONTENT_FILE_CAJ,
-	HTTP_CONTENT_FILE_MARC,
-	HTTP_CONTENT_FILE_RIS,
-	HTTP_CONTENT_FILE_BIB,
-	HTTP_CONTENT_FILE_TXT,
-	HTTP_CONTENT_FILE_PDG,
-	HTTP_CONTENT_FILE_EXCEL,
-	HTTP_CONTENT_FILE_RTF,
-	HTTP_CONTENT_FILE_OTHER
-};
-
-enum HTTP_APPEND_STATUS { 
-	HTTP_APPEND_DROP_PACKET = -1,
-	HTTP_APPEND_ADD_PACKET = 0,
-	HTTP_APPEND_ADD_PACKET_LATER,
-	HTTP_APPEND_FINISH_LATER,
-	HTTP_APPEND_FINISH_CURRENT
-};
 
 // IDL -> REQUESTING -> REQUEST -> REPONSEING -> REPONSE -> FINISH
 //           |------------|------------|------------------> TIMEOUT
@@ -674,8 +639,21 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 						nThreadIndex, index, pREQ->flag, pREQ->res1, pREQ->res2, 
 						pREQ->seq, pREQ->ack, tcphead->seq, tcphead->ack_seq, g_nReusedCount);
 
-				LogDropSessionData("Rebuild Failed:Channel Reuse", pREQ);
-				CleanHttpSession(pREQ);
+				if (g_bIsLogChannelReusedData)
+					LogDropSessionData("Rebuild Failed:Channel Reuse", pREQ);
+
+				if (!g_bIsSendChannelReusedData)
+					CleanHttpSession(pREQ);
+				else
+				{
+					pREQ->finish_type = HTTP_SESSION_FINISH_CHANNEL_REUSED;
+					pREQ->flag = HTTP_SESSION_FINISH;
+					if (push_queue(_whole_content, pREQ) < 0)
+					{
+						++g_nCountWholeContentFull[nThreadIndex];
+						LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
+					}
+				}
 			} 
 			else if (tv->tv_sec - pREQ->update.tv_sec > g_nHttpTimeout) 
 			{
@@ -683,12 +661,14 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
 				LOGINFO("Timeout Session[%d][%d] Request Head Content = %s", nThreadIndex, index, pREQ->request_head);
 
-				LogDropSessionData("Rebuild Failed:Time Out", pREQ);
+				if (g_bIsLogTimeoutData)
+					LogDropSessionData("Rebuild Failed:Time Out", pREQ);
 
 				if (!g_bIsSendTimeoutData)
 					CleanHttpSession(pREQ);
 				else
 				{
+					pREQ->finish_type = HTTP_SESSION_FINISH_TIMEOUT;
 					pREQ->flag = HTTP_SESSION_FINISH;
 					if (push_queue(_whole_content, pREQ) < 0)
 					{
@@ -768,7 +748,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
-	const char *content = (void*)tcphead + tcphead->doff*4;
+	char *content = (void*)tcphead + tcphead->doff*4;
 	struct tcp_session *pSession = &_http_session_array[nThreadIndex][nIndex];
 
 	// Check seq and ack. not fix.
@@ -837,8 +817,21 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u, g_nLaterPackIsMaxCount = %d", 
 							nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, g_nLaterPackIsMaxCount);
 
-					LogDropSessionData("Rebuild Failed:Disorder Rebuild Failed", pSession);
-					CleanHttpSession(pSession);
+					if (g_bIsLogDisorderRebuildFailedData)
+						LogDropSessionData("Rebuild Failed:Disorder Rebuild Failed", pSession);
+					
+					if (!g_bIsSendDisorderRebuildFailedData)
+						CleanHttpSession(pSession);
+					else
+					{
+						pSession->finish_type = HTTP_SESSION_FINISH_DISORDER_REBUILD_FAILED;
+						pSession->flag = HTTP_SESSION_FINISH;
+						if (push_queue(_whole_content, pSession) < 0)
+						{
+							++g_nCountWholeContentFull[nThreadIndex];
+							LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
+						}
+					}
 					
 					return HTTP_APPEND_DROP_PACKET;
 				}
@@ -1095,7 +1088,6 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		}
 		else if (pSession->content_type != HTTP_CONTENT_RES)
 		{
-			char *tmp = NULL;
 			char *pszContentLen = memmem(content, contentlen, "content-length:", 15);
 			char *pszTE = memmem(content, contentlen, "transfer-encoding:", 18);
 			char *pszChunked = memmem(content, contentlen, "chunked", 7);
@@ -1177,7 +1169,8 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			LOGDEBUG("Session[%d][%d] content is file.", nThreadIndex, nIndex);
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
-			
+
+			pSession->finish_type = HTTP_SESSION_FINISH_SUCCESS;
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
@@ -1205,7 +1198,8 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
-			
+
+			pSession->finish_type = HTTP_SESSION_FINISH_UNKNOWN_DATA;
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
@@ -1231,7 +1225,8 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			LOGDEBUG("Session[%d][%d] end_reponse content-length/recv = %u/%u, content= %s", nThreadIndex, nIndex, pSession->res1, pSession->res2, content);
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
-			
+
+			pSession->finish_type = HTTP_SESSION_FINISH_SUCCESS;
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
@@ -1253,7 +1248,8 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			LOGDEBUG("Session[%d][%d]end_reponse with chunked data", nThreadIndex, nIndex);
 			if (!bIsCurPack)
 				return HTTP_APPEND_FINISH_LATER;
-			
+
+			pSession->finish_type = HTTP_SESSION_FINISH_SUCCESS;
 			pSession->flag = HTTP_SESSION_FINISH;
 			if (push_queue(_whole_content, pSession) < 0)
 			{
@@ -1280,6 +1276,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 				if (!bIsCurPack)
 					return HTTP_APPEND_FINISH_LATER;
 				
+				pSession->finish_type = HTTP_SESSION_FINISH_SUCCESS;
 				pSession->flag = HTTP_SESSION_FINISH;
 				if (push_queue(_whole_content, pSession) < 0)
 				{
@@ -1400,6 +1397,7 @@ int AppendLaterPacket(int nThreadIndex, int nIndex)
 					free(pCurTmp);
 					break;
 				case HTTP_APPEND_FINISH_LATER:
+					pSession->finish_type = HTTP_SESSION_FINISH_SUCCESS;
 					pSession->flag = HTTP_SESSION_FINISH;
 					if (push_queue(_whole_content, pSession) < 0)
 					{
@@ -1448,12 +1446,14 @@ int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 			LOGWARN("One http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
 			LOGINFO("Timeout Session[%d][%d] Request Head Content = %s", nThreadIndex, index, pREQ->request_head);
 
-			LogDropSessionData("Rebuild Failed:Time Out", pREQ);
+			if (g_bIsLogTimeoutData)
+				LogDropSessionData("Rebuild Failed:Time Out", pREQ);
 
 			if (!g_bIsSendTimeoutData)
 				CleanHttpSession(pREQ);
 			else
 			{
+				pREQ->finish_type = HTTP_SESSION_FINISH_TIMEOUT;
 				pREQ->flag = HTTP_SESSION_FINISH;
 				if (push_queue(_whole_content, pREQ) < 0)
 				{
@@ -1500,7 +1500,7 @@ int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 	}
 	if (index == g_nMaxHttpSessionCount) 
 	{
-		char sip[20], dip[20], stip[20], dtip[20];
+		char stip[20], dtip[20];
 		LOGTRACE("Session[%d][%d]  append %s:%d => %s:%d", nThreadIndex, index,
 				inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
 				inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest));
@@ -1655,6 +1655,48 @@ int HttpInit()
 	GetValue(CONFIG_PATH, "send_timeout_data", szSendTimeoutData, 6);
 	if (strcmp(szSendTimeoutData, "true") == 0)
 		g_bIsSendTimeoutData = 1;
+
+	char szSendChannelReusedData[10] = {0};
+	GetValue(CONFIG_PATH, "send_channel_reused_data", szSendChannelReusedData, 6);
+	if (strcmp(szSendChannelReusedData, "true") == 0)
+		g_bIsSendChannelReusedData = 1;
+
+	char szSendUnknownData[10] = {0};
+	GetValue(CONFIG_PATH, "send_unknown_data", szSendUnknownData, 6);
+	if (strcmp(szSendUnknownData, "true") == 0)
+		g_bIsSendUnknownData = 1;
+
+	char szSendDisorderRebuildFailedData[10] = {0};
+	GetValue(CONFIG_PATH, "send_disorder_rebuild_failed_data", szSendDisorderRebuildFailedData, 6);
+	if (strcmp(szSendDisorderRebuildFailedData, "true") == 0)
+		g_bIsSendDisorderRebuildFailedData = 1;
+
+	char szLogResData[10] = {0};
+	GetValue(CONFIG_PATH, "log_image_data", szLogResData, 6);
+	if (strcmp(szLogResData, "true") == 0)
+		g_bIsLogResData = 1;
+	
+	char szLogTimeoutData[10] = {0};
+	GetValue(CONFIG_PATH, "log_timeout_data", szLogTimeoutData, 6);
+	if (strcmp(szLogTimeoutData, "true") == 0)
+		g_bIsLogTimeoutData = 1;
+
+	char szLogChannelReusedData[10] = {0};
+	GetValue(CONFIG_PATH, "log_channel_reused_data", szLogChannelReusedData, 6);
+	if (strcmp(szLogChannelReusedData, "true") == 0)
+		g_bIsLogChannelReusedData = 1;
+
+	char szLogUnknownData[10] = {0};
+	GetValue(CONFIG_PATH, "log_unknown_data", szLogUnknownData, 6);
+	if (strcmp(szLogUnknownData, "true") == 0)
+		g_bIsLogUnknownData = 1;
+
+	char szLogDisorderRebuildFailedData[10] = {0};
+	GetValue(CONFIG_PATH, "log_disorder_rebuild_failed_data", szLogDisorderRebuildFailedData, 6);
+	if (strcmp(szLogDisorderRebuildFailedData, "true") == 0)
+		g_bIsLogDisorderRebuildFailedData = 1;
+	
+	GetValue(CONFIG_PATH, "special_client_ip", g_szSpecialClientIp, 100);
 	
 	g_nMaxHttpSessionCount = atoi(szMaxSessionCount);
 	if (g_nMaxHttpSessionCount < 50 || g_nMaxHttpSessionCount > 100000)
@@ -1791,9 +1833,6 @@ int inExcludeHosts(const char* buffer, const struct iphdr* iphead, const struct 
 {
 	if (NULL == _exclude_hosts)
 		return -1;
-	
-	const char *content = (const char *)tcphead + tcphead->doff*4;
-	unsigned *cmd = (unsigned*)content;
 	
 	for (int npos = 0; npos < _exclude_hosts_count; npos++)
 	{
@@ -2100,6 +2139,8 @@ int GetHttpData(char **data)
 	ASSERT(pSession->flag == HTTP_SESSION_FINISH);
 	assert(pSession->data != NULL);
 
+	LOGDEBUG("Session[%d][%d] ready to get data.", pSession->thread_index, pSession->index);
+	
 	// get all http_content len
 	unsigned transfer_flag = pSession->transfer_flag;
 	void* packet = pSession->data;
@@ -2214,30 +2255,73 @@ int GetHttpData(char **data)
 		LOGERROR("No GET or POST. %c%c%c%c", HTTP[0],HTTP[1],HTTP[2],HTTP[3]);
 	}
 
-	if (HTTP == NULL) 
+	int nHttpNoErr = 0;
+	if (HTTP != NULL) 
 	{
-		++g_nContentErrorCount;
-		++g_nHttpNullCount;
-		LOGWARN("Fail to find http content! g_nContentErrorCount = %d, g_nHttpNullCount = %d", g_nContentErrorCount, g_nHttpNullCount);
+		if ((HTTP - http_content) >= data_len) 
+		{
+			if (HTTP_SESSION_FINISH_SUCCESS == pSession->finish_type)
+			{
+				++g_nContentErrorCount;
+				++g_nDatalenErrorCount;
+				LOGWARN("Session[%d][%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->thread_index, pSession->index, HTTP_PRE, g_nContentErrorCount, g_nDatalenErrorCount);
 
-		LogDropSessionData("Content Error:Http Null", pSession);
-		CleanHttpSession(pSession);
-		free(http_content);
-		return 0;
+				if (g_bIsLogUnknownData)
+					LogDropSessionData("Content Error:Data Length Error", pSession);
+			}
+		}
+		else
+		{
+			nHttpNoErr = 1;
+		}
+	}
+	else
+	{
+		if (HTTP_SESSION_FINISH_SUCCESS == pSession->finish_type)
+		{
+			++g_nContentErrorCount;
+			++g_nHttpNullCount;
+			LOGWARN("Fail to find http content! g_nContentErrorCount = %d, g_nHttpNullCount = %d", g_nContentErrorCount, g_nHttpNullCount);
+
+			if (g_bIsLogUnknownData)
+				LogDropSessionData("Content Error:Http Null", pSession);
+		}
 	}
 
-	if ((HTTP - http_content) >= data_len) {
-		++g_nContentErrorCount;
-		++g_nDatalenErrorCount;
-		LOGWARN("Session[%d][%d] Address more than data length. Current content= %s, g_nContentErrorCount = %d, g_nDatalenErrorCount = %d", pSession->thread_index, pSession->index, HTTP_PRE, g_nContentErrorCount, g_nDatalenErrorCount);
+	if (HTTP_SESSION_FINISH_SUCCESS == pSession->finish_type)
+	{
+		if (!nHttpNoErr)
+		{
+			CleanHttpSession(pSession);
+			free(http_content);
+			return 0;
+		}
+	}
+	else if (HTTP_SESSION_FINISH_UNKNOWN_DATA != pSession->finish_type)
+	{
+		int nHttpcode = 0;
+		switch (pSession->finish_type)
+		{
+			case HTTP_SESSION_FINISH_TIMEOUT:
+				nHttpcode = HTTP_SPECIAL_STATE_TIMEOUT;
+				break;
+			case HTTP_SESSION_FINISH_CHANNEL_REUSED:
+				nHttpcode = HTTP_SPECIAL_STATE_CHANNEL_REUSED;
+				break;
+			case HTTP_SESSION_FINISH_DISORDER_REBUILD_FAILED:
+				nHttpcode = HTTP_SPECIAL_STATE_DISORDER_REBUILD_FAILED;
+				break;
+		}
+		sprintf(http_content+35, "STATE=%03d", nHttpcode);
 
-		LogDropSessionData("Content Error:Data Length Error", pSession);
+		LogDataItems(pSession, nHttpcode, data_len);
 		CleanHttpSession(pSession);
-		free(http_content);
-		return 0;
+		*data = http_content;
+		LOGDEBUG("Session[%d][%d] get data successfully!", pSession->thread_index, pSession->index);
+
+		return data_len;
 	}
 	
-	LOGDEBUG("Session[%d][%d] ready to get data.", pSession->thread_index, pSession->index);
 	if ((pSession->content_type != HTTP_CONTENT_NONE)
 		|| (HTTP_TRANSFER_WITH_HTML_END == transfer_flag))
 	{
@@ -2251,7 +2335,9 @@ int GetHttpData(char **data)
 			++g_nContentErrorCount;
 			++g_nHttpcodeErrorCount;
 
-			LogDropSessionData("Content Error:HTTP/1.1 Null", pSession);
+			if (g_bIsLogUnknownData)
+				LogDropSessionData("Content Error:HTTP/1.1 Null", pSession);
+			
 			LOGWARN("Session[%d][%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->thread_index, pSession->index, HTTP_PRE, g_nContentErrorCount, g_nHttpcodeErrorCount);
 			CleanHttpSession(pSession);
 			free(http_content);
@@ -2502,13 +2588,24 @@ NOZIP:
 	}
 	else
 	{
-		//LOGDEBUG("Session[%d][%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->thread_index, pSession->index);
 		++g_nContentErrorCount;
 		++g_nContentUnknownCount;
 		LOGWARN("Session[%d][%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END, g_nContentErrorCount = %d, g_nContentUnknownCount = %d", pSession->thread_index, pSession->index, g_nContentErrorCount, g_nContentUnknownCount);
 		LOGINFO("Session[%d][%d] content is %s", pSession->thread_index, pSession->index, HTTP_PRE);
 
-		LogDropSessionData("Rebuild Failed:Content Unknown", pSession);
+		if (g_bIsLogUnknownData)
+			LogDropSessionData("Rebuild Failed:Content Unknown", pSession);
+		
+		if (g_bIsSendUnknownData)
+		{
+			int nHttpcode = HTTP_SPECIAL_STATE_UNKNOWN_DATA;
+			sprintf(http_content+35, "STATE=%03d", nHttpcode);
+			LogDataItems(pSession, nHttpcode, data_len);
+			CleanHttpSession(pSession);
+			*data = http_content;
+			LOGDEBUG("Session[%d][%d] get data successfully!", pSession->thread_index, pSession->index);
+			return data_len;
+		}
 	}
 		
 	CleanHttpSession(pSession);
@@ -2529,7 +2626,13 @@ void LogDropSessionData(const char *pszDropType, const struct tcp_session *pSess
 	char szUrl[1500] = {0};
 	inet_ntop(AF_INET, &pSession->client.ip, sip, 20);
 	inet_ntop(AF_INET, &pSession->server.ip, dip, 20);
-	
+
+	if ('\0' != g_szSpecialClientIp[0])
+	{
+		if (strstr(g_szSpecialClientIp, sip) == NULL)
+			return;
+	}
+		
 	int nStart = 5;
 	char *pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);
 	if (NULL == pszUrlStart)
@@ -2621,6 +2724,12 @@ void LogDataItems(const struct tcp_session *pSession, int nState, int nDataSize)
 	char szUrl[1500] = {0};
 	inet_ntop(AF_INET, &pSession->client.ip, sip, 20);
 	inet_ntop(AF_INET, &pSession->server.ip, dip, 20);
+
+	if ('\0' != g_szSpecialClientIp[0])
+	{
+		if (strstr(g_szSpecialClientIp, sip) == NULL)
+			return;
+	}
 	
 	int nStart = 5;
 	char *pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);

@@ -22,13 +22,12 @@
 static int _epollfd = 0;
 static struct epoll_event _events[MONITOR_COUNT];
 int _active_sock = 0;
-
-InterfaceFdDef g_arrayActiveFd[MONITOR_COUNT] = {0};
-static pthread_mutex_t _recvlock = PTHREAD_MUTEX_INITIALIZER;
+InterfaceFdDef g_arrayActiveFd[MONITOR_COUNT];
 
 int get_iface_id(int fd, const char* device)
 {
-	struct ifreq ifr = {0};
+	struct ifreq ifr;
+	memset(&ifr, 0, sizeof(struct ifreq));
 	strncpy(ifr.ifr_name, device, sizeof(ifr.ifr_name));
 	if (ioctl(fd, SIOCGIFINDEX, &ifr) == -1) {
 		perror("[ERROR] ");
@@ -39,7 +38,8 @@ int get_iface_id(int fd, const char* device)
 
 int active_device(int fd, const char* device)
 {
-	struct ifreq ifr = {0};
+	struct ifreq ifr;
+	memset(&ifr, 0, sizeof(struct ifreq));
 	strncpy(ifr.ifr_name, device, sizeof(ifr.ifr_name));
 	if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {
 		perror("[ERROR] ");
@@ -93,6 +93,7 @@ int OpenMonitorDevs()
 
 	ASSERT(_epollfd==0);
 	ASSERT(_active_sock == 0);
+	memset(g_arrayActiveFd, 0, sizeof(InterfaceFdDef)*MONITOR_COUNT);
 	_epollfd = epoll_create(MONITOR_COUNT);
 	ASSERT(_epollfd!=-1);
 	struct epoll_event ev;
@@ -112,7 +113,7 @@ int OpenMonitorDevs()
 			strcpy(g_arrayActiveFd[_active_sock].szInterface, left);
 			g_arrayActiveFd[_active_sock].nFd = nCurFd;
 			LOGINFO("open interface %s", left);
-			ev.events = EPOLLIN;
+			ev.events = EPOLLIN | EPOLLONESHOT;
 			ev.data.fd = g_arrayActiveFd[_active_sock].nFd;
 			if (epoll_ctl(_epollfd, EPOLL_CTL_ADD, g_arrayActiveFd[_active_sock].nFd, &ev)==-1) 
 			{
@@ -129,41 +130,54 @@ int OpenMonitorDevs()
 	return _active_sock;
 }
 
-int CapturePacket(char* buffer, size_t size, int *nFdIndex)
+void ResetOneshot(int nFdIndex)
+{
+    struct epoll_event event;  
+    event.data.fd = g_arrayActiveFd[nFdIndex].nFd;
+    event.events = EPOLLIN | EPOLLONESHOT;  
+    if (epoll_ctl(_epollfd, EPOLL_CTL_MOD, g_arrayActiveFd[nFdIndex].nFd, &event) == -1)
+    {
+		LOGERROR0("ResetOneshot error!");
+	}
+}  
+
+int GetFdEvent()
 {
 	assert(_epollfd > 0);
 	assert(_active_sock > 0);
 
-	pthread_mutex_lock(&_recvlock);
+	int nIndex = -1;
 	int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
 	if (nfds < 1) 
 	{
-		pthread_mutex_unlock(&_recvlock);
-		return 0;
+		return -2;
 	}
 	
-	struct sockaddr_in sa;
-	size_t salen = sizeof(sa);
-
-	//pthread_mutex_lock(&_recvlock);
-
 	int nFd = _events[0].data.fd;
-	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0,
-							(struct sockaddr*)&sa, &salen);
-
-	pthread_mutex_unlock(&_recvlock);
-
-	if (nRecv == -1) 
-		return 0;
-
 	for (int i = 0; i < _active_sock; i++)
 	{
 		if (nFd == g_arrayActiveFd[i].nFd)
 		{
-			*nFdIndex = i;
+			nIndex = i;
 			break;
 		}
 	}
+	
+	return nIndex;
+}
+
+int CapturePacket(int nFdIndex, char* buffer, size_t size)
+{
+	struct sockaddr_in sa;
+	size_t salen = sizeof(sa);
+
+	int nRecv = recvfrom(g_arrayActiveFd[nFdIndex].nFd, buffer, size, 0,
+							(struct sockaddr*)&sa, &salen);
+
+	if(nRecv < 0)
+	{	
+		LOGERROR("CapturePacket error! errno=[%d] %s", errno, strerror(errno));
+	} 
 	
 	return nRecv;
 }

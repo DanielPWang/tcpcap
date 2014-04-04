@@ -17,7 +17,7 @@
 
 extern const char* CONFIG_PATH;
 static int g_drop_data_log_func_on = 0;
-static int g_date_items_log_func_on = 0;
+static int g_data_items_log_func_on = 0;
 static time_t g_ddl_starttime = 0;
 static time_t g_ddl_endtime = 0;
 static time_t g_dil_starttime = 0;
@@ -149,9 +149,9 @@ int dtstr2time(const char *pszDate)
 #define DROP_DATA_LOG_FOLDER "./drop_data_log/"
 #define DATA_ITEMS_LOG_FOLDER "./data_items_log/"
 
-static LogFileDef g_fileLog = {NULL, 0, 0, {0}, {0}};
-static LogFileDef g_fileDropDataLog = {NULL, 0, 0, {0}, {0}};
-static LogFileDef g_fileDataItemsLog = {NULL, 0, 0, {0}, {0}};
+static LogFileDef g_fileLog = {0, NULL, 0, 0, {0}, {0}};
+static LogFileDef g_fileDropDataLog = {0, NULL, 0, 0, {0}, {0}};
+static LogFileDef g_fileDataItemsLog = {0, NULL, 0, 0, {0}, {0}};
 
 static int g_nLogDays = 15;
 static size_t LOG_LENGTH_MAX = 256 * 1024 * 1024;
@@ -190,7 +190,6 @@ int open_log(int nLevel, const char *pszFolder, LogFileDef *pLogFile)
 	int nFileSize = atoi(szFileSize);
 	pLogFile->nMaxSize = ((nFileSize < 10) || (nFileSize > 1024)) ? LOG_LENGTH_MAX : (nFileSize * 1024 * 1024);
 	
-	char szLogFilePath[100] = {0};
 	strcpy(pLogFile->szFileName, pszFolder);
 
 	time_t now = time(NULL);
@@ -271,12 +270,12 @@ void open_all_log(int nLevel)
 	else
 		printf("Drop Data Log Function:OFF\n");
 	
-	char szDateItemsLogFnnc[10] = {0};
-	GetValue(CONFIG_PATH, "date_items_log_func", szDateItemsLogFnnc, 6);
-	if (strcmp(szDateItemsLogFnnc, "true") == 0)
-		g_date_items_log_func_on = 1;
+	char szDataItemsLogFnnc[10] = {0};
+	GetValue(CONFIG_PATH, "data_items_log_func", szDataItemsLogFnnc, 6);
+	if (strcmp(szDataItemsLogFnnc, "true") == 0)
+		g_data_items_log_func_on = 1;
 
-	if (g_date_items_log_func_on)
+	if (g_data_items_log_func_on)
 	{
 		char szStartTime[30] = {0};
 		char szEndTime[30] = {0};
@@ -312,7 +311,7 @@ void open_all_log(int nLevel)
 			open_log(0, DATA_ITEMS_LOG_FOLDER, &g_fileDataItemsLog);
 		}
 		else
-			g_date_items_log_func_on = 0;
+			g_data_items_log_func_on = 0;
 	}
 	else
 		printf("Data Items Log Function:OFF\n");
@@ -332,7 +331,7 @@ int is_log_drop_data()
 
 int is_log_data_items()
 {
-	if (!g_date_items_log_func_on)
+	if (!g_data_items_log_func_on)
 		return 0;
 
 	time_t now = time(NULL);
@@ -680,7 +679,6 @@ void CheckLogFullDays(const char *pszFolder, int nFullDays)
 		free(pDent);
     }
 
-	int nIsFull = 0;
 	if (nDays >= nFullDays)
 	{
 		char szDelFile[512] = {0};
@@ -700,10 +698,10 @@ void print_bt()
 ////////// fixed-length queue
 struct _queue_fixed
 {
-	unsigned max_size;
-	unsigned size;
-	unsigned head;
-	unsigned tail;
+	volatile unsigned max_size;
+	volatile unsigned size;
+	volatile unsigned head;
+	volatile unsigned tail;
 	pthread_mutex_t lock;
 	const void* points[0];
 };
@@ -812,7 +810,6 @@ int64_t ntohll(int64_t n)
 int code_convert(char *from_charset, char *to_charset, char *inbuf, int inlen, char *outbuf, int outlen)
 {  
 	iconv_t cd;
-	int rc;
 	char **pin = &inbuf;
 	char **pout = &outbuf;
 

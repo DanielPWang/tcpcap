@@ -9,7 +9,9 @@ typedef struct InterfaceFd
 
 int OpenMonitorDevs();
 
-int CapturePacket(char* buffer, size_t size, int *nFdIndex);
+void ResetOneshot(int nFdIndex);
+int GetFdEvent();
+int CapturePacket(int nFdIndex, char* buffer, size_t size);
 
 #endif
 

@@ -928,7 +928,6 @@ thread_start:
 	}
 	Unblock(_srv_socket);
 	
-	int nerr = 0;
 	fd_set rfds;
 	struct timeval tv;
 	int retval = 0;

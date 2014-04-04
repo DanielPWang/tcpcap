@@ -23,19 +23,24 @@
 #include "define.h"
 #include <block.h>
 
-static pthread_t _capture_thread[10];
+static pthread_t _epoll_thread;
+static pthread_t _capture_thread[MONITOR_COUNT];
 int SockManager;
 volatile int Living = 1;
 volatile int NeedReloadConfig = 0;
 int _net_flow_func_on = 0;
 int _block_func_on = 0;
 
+int g_nActiveFd[MONITOR_COUNT] = {0};
+uint64_t g_nPreCapCount[MONITOR_COUNT] = {0};
 uint64_t g_nCapCount[MONITOR_COUNT] = {0};
 uint64_t g_nCapSize[MONITOR_COUNT] = {0};
 uint32_t g_nCapFisrtTime = 0;
 uint32_t g_nCapLastTime = 0;
 extern uint64_t g_nSkippedPackCount;
 extern uint32_t g_nThreadCount;
+static int _thread_param[MONITOR_COUNT] = {0, 1, 2, 3, 4, 5, 6};
+extern int _active_sock;
 
 const char *MonitorFilter;
 const char* CONFIG_PATH;
@@ -79,6 +84,9 @@ void ShowUsage(int nExit)
 
 void *capture_thread(void* param)
 {
+	int nFdIndex = *(int*)param;
+
+	g_nActiveFd[nFdIndex] = 1;
 	char* buffer = NULL;
 	int nrecv = 0;
 	while (Living) 
@@ -92,10 +100,22 @@ void *capture_thread(void* param)
 
 		do 
 		{
-			int nFdIndex = -1;
-			nrecv = CapturePacket(buffer, RECV_BUFFER_LEN, &nFdIndex);
-			if (nrecv == 0) 
+			nrecv = CapturePacket(nFdIndex, buffer, RECV_BUFFER_LEN);
+			if (nrecv == 0)
+			{
+				//printf("CapturePacket size = 0, fdindex = %d!\n", nFdIndex);
 				continue;
+			}
+			else if (nrecv < 0)
+			{
+				free(buffer);
+				g_nPreCapCount[nFdIndex] = 0;
+				g_nActiveFd[nFdIndex] = 0;
+				ResetOneshot(nFdIndex);
+				//printf("CapturePacket error, ResetOneshot, fdindex = %d!\n", nFdIndex);
+				LOGERROR("CapturePacket error, ResetOneshot, fdindex = %d!", nFdIndex);
+				return NULL;
+			}
 
 			++g_nCapCount[nFdIndex];
 			g_nCapSize[nFdIndex] += nrecv;
@@ -136,6 +156,26 @@ void *capture_thread(void* param)
 			}
 			memset(buffer, 0, RECV_BUFFER_LEN);
 		} while (Living);
+	}
+
+	return NULL;
+}
+
+void *epoll_thread(void* param)
+{
+	while (Living) 
+	{
+		int nFdIndex = GetFdEvent();
+		if (nFdIndex < 0)
+		{
+			sleep(2);
+			LOGERROR0("GetFdEvent error!\n");
+			continue;
+		}
+
+		LOGINFO("GetFdEvent successfully! fdindex = %d", nFdIndex);
+		int err = pthread_create(&_capture_thread[nFdIndex], NULL, &capture_thread, &_thread_param[nFdIndex]);
+		ASSERT(err == 0);
 	}
 
 	return NULL;
@@ -214,12 +254,9 @@ int main(int argc, char* argv[])
 	if (_block_func_on)
 		InitBlockProc();
 
-	for (int i = 0; i < g_nThreadCount; i++)
-	{
-		int err = pthread_create(&_capture_thread[i], NULL, &capture_thread, NULL);
-		ASSERT(err==0);
-	}
-	
+	int err = pthread_create(&_epoll_thread, NULL, &epoll_thread, NULL);
+	ASSERT(err==0);
+		
 	time_t op_log_time = time(NULL);
 	while (Living) 
 	{
@@ -232,6 +269,27 @@ int main(int argc, char* argv[])
 		{
 			ShowOpLogInfo(0);
 			op_log_time = time(NULL);
+
+			for (int i = 0; i < _active_sock; i++)
+			{
+				if (1 == g_nActiveFd[i])
+				{
+					if (g_nCapCount[i] > 0)
+					{
+						if (g_nCapCount[i] == g_nPreCapCount[i])
+						{
+							pthread_cancel(_capture_thread[i]);
+							g_nPreCapCount[i] = 0;
+							g_nActiveFd[i] = 0;
+							ResetOneshot(i);
+						}
+						else
+						{
+							g_nPreCapCount[i] = g_nCapCount[i];
+						}
+					}
+				}
+			}
 		}
 
 		sleep(1);
