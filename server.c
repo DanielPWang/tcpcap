@@ -31,9 +31,9 @@ extern pthread_mutex_t _host_ip_lock;
 extern volatile int g_nFlagIpHostLock;
 
 static int _srv_socket = -1;
-static int _client_socket = -1;
+volatile static int _client_socket = -1;
 static char _client_ip[16] = {0};
-static int _client_config_socket = -1;
+volatile static int _client_config_socket = -1;
 static char _client_config_ip[16] = {0};
 static time_t _flow_socket_start_time = 0;
 extern int _net_flow_func_on;
@@ -41,7 +41,7 @@ extern int _block_func_on;
 
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
-static time_t _active = 0;
+time_t g_nActiveSocketUpdateTime = 0;
 
 volatile int g_nFlagGetData = 0;
 volatile int g_nFlagSendData = 0;
@@ -116,9 +116,9 @@ int WriteSocketData(int sock, const void *pBuffer, int nWriteSize)
 			}
 			else
 			{
-				if (++nRepeatForFD >= 10000)
+				if (++nRepeatForFD >= 2500)
 				{
-					LOGWARN0("Total time of FD_ISSET=0 is more than 100 seconds!");
+					LOGWARN0("Total time of FD_ISSET=0 is more than 25 seconds!");
 					return -1;
 				}
 			}
@@ -129,9 +129,9 @@ int WriteSocketData(int sock, const void *pBuffer, int nWriteSize)
 		}
 		else if (0 == nRet)
 		{
-			if (++nRepeatForSel >= 10000)
+			if (++nRepeatForSel >= 2500)
 			{
-				LOGWARN0("Total time of selecting timeout is more than 100 seconds!");
+				LOGWARN0("Total time of selecting timeout is more than 25 seconds!");
 				return -1;
 			}
 		}
@@ -196,9 +196,9 @@ int ReadSocketData(int sock, char *pBuffer, int nReadSize)
 			}
 			else
 			{
-				if (++nRepeatForFD >= 10000)
+				if (++nRepeatForFD >= 2500)
 				{
-					LOGWARN0("Total time of FD_ISSET=0 is more than 100 seconds!");
+					LOGWARN0("Total time of FD_ISSET=0 is more than 25 seconds!");
 					return -1;
 				}
 			}
@@ -209,9 +209,9 @@ int ReadSocketData(int sock, char *pBuffer, int nReadSize)
 		}
 		else if (0 == nRet)
 		{
-			if (++nRepeatForSel >= 10000)
+			if (++nRepeatForSel >= 2500)
 			{
-				LOGWARN0("Total time of selecting timeout is more than 100 seconds!");
+				LOGWARN0("Total time of selecting timeout is more than 25 seconds!");
 				return -1;
 			}
 		}
@@ -611,6 +611,7 @@ int ProcessServerSockReq()
 			}
 			else
 			{
+				g_nActiveSocketUpdateTime = time(NULL);
 				_client_socket = accept_socket;
 				memset(_client_ip, 0, 16);
 				strcpy(_client_ip, sip);
@@ -855,7 +856,7 @@ int ProcessClientSockRes()
 			_client_socket = -1;
 			return -1;
 		}
-		_active = time(NULL);
+		g_nActiveSocketUpdateTime = time(NULL);
 	}
 	g_nFlagGetData = 1;
 
@@ -894,11 +895,12 @@ int ProcessClientSockRes()
 		}
 	}
 	
-	if (time(NULL) - _active > 10) 
+	if (time(NULL) - g_nActiveSocketUpdateTime > 10) 
 	{
-		_active = time(NULL);
+		g_nActiveSocketUpdateTime = time(NULL);
 		nSend = SendData(_client_socket, MSG_TYPE_HEARTHIT, NULL, 0);
-		if (nSend < 0) {
+		if (nSend < 0) 
+		{
 			LOGWARN0("remote client socket is error or close. recontinue.");
 			close(_client_socket);
 			_client_socket = -1;
@@ -907,6 +909,11 @@ int ProcessClientSockRes()
 	}
 
 	return nRs;
+}
+
+int ClientSocketIsValid()
+{
+	return (_client_socket <= 0) ? 0:1; 
 }
 
 void* server_thread(void* p)
@@ -932,7 +939,7 @@ thread_start:
 	struct timeval tv;
 	int retval = 0;
 	int max_socket = 0;
-	_active = time(NULL);
+	g_nActiveSocketUpdateTime = time(NULL);
 	
 	while (_runing) 
 	{
@@ -1008,6 +1015,7 @@ thread_start:
 	{
 		shutdown(_client_socket, SHUT_RDWR);
 		close(_client_socket);
+		_client_socket = -1;
 	}
 	
 	shutdown(_srv_socket, SHUT_RDWR);
@@ -1063,6 +1071,8 @@ int LocalCacheFile()
 		char *pData = NULL;
 		int nDataLen = 0;
 		int nWriteRs = 0;
+
+		g_nFlagGetData = 0;
 		if ((nDataLen = GetHttpData(&pData)) > 0) 
 		{
 			LOGDEBUG("Cache http_info[%d] %s", nDataLen, pData);
@@ -1112,6 +1122,7 @@ int LocalCacheFile()
 				nRs = nWriteRs;
 			}
 		}
+		g_nFlagGetData = 1;
 	}
 	
 	return nRs;
@@ -1150,6 +1161,29 @@ int StartServer()
 	printf("cache_full_day = %d\n", g_nCacheDays);
 	printf("cache_file_size = %d MB\n", nCacheFileSize);
 		
+	int nerr = pthread_create(&_srv_thread, NULL, &server_thread, NULL);
+	return nerr;
+}
+
+int RebootServerThread()
+{
+	pthread_cancel(_srv_thread);
+
+	shutdown(_srv_socket, SHUT_RDWR);
+	close(_srv_socket);
+	if (_client_socket > 0)
+	{
+		shutdown(_client_socket, SHUT_RDWR);
+		close(_client_socket);
+		_client_socket = -1;
+	}
+	if (_client_config_socket > 0)
+	{
+		close(_client_config_socket);
+		_client_config_socket = -1;
+	}
+
+	sleep(3);
 	int nerr = pthread_create(&_srv_thread, NULL, &server_thread, NULL);
 	return nerr;
 }

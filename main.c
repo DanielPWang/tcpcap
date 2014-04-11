@@ -41,6 +41,7 @@ extern uint64_t g_nSkippedPackCount;
 extern uint32_t g_nThreadCount;
 static int _thread_param[MONITOR_COUNT] = {0, 1, 2, 3, 4, 5, 6};
 extern int _active_sock;
+extern time_t g_nActiveSocketUpdateTime;
 
 const char *MonitorFilter;
 const char* CONFIG_PATH;
@@ -163,19 +164,26 @@ void *capture_thread(void* param)
 
 void *epoll_thread(void* param)
 {
+	int nFdEventIndexArray[MONITOR_COUNT] = {0};
 	while (Living) 
 	{
-		int nFdIndex = GetFdEvent();
-		if (nFdIndex < 0)
+		memset(nFdEventIndexArray, 0, MONITOR_COUNT*sizeof(int));
+		int nFdCount = GetFdEvent(nFdEventIndexArray);
+		if (nFdCount <= 0)
 		{
 			sleep(2);
 			LOGERROR0("GetFdEvent error!\n");
 			continue;
 		}
 
-		LOGINFO("GetFdEvent successfully! fdindex = %d", nFdIndex);
-		int err = pthread_create(&_capture_thread[nFdIndex], NULL, &capture_thread, &_thread_param[nFdIndex]);
-		ASSERT(err == 0);
+		LOGINFO("GetFdEvent successfully! FdCount = %d", nFdCount);
+		for (int i = 0; i < nFdCount; i++)
+		{
+			int nFdIndex = nFdEventIndexArray[i];
+			LOGINFO("GetFdEvent, FdIndex = %d", nFdIndex);
+			int err = pthread_create(&_capture_thread[nFdIndex], NULL, &capture_thread, &_thread_param[nFdIndex]);
+			ASSERT(err == 0);
+		}
 	}
 
 	return NULL;
@@ -264,6 +272,16 @@ int main(int argc, char* argv[])
 			g_nCapFisrtTime = time(NULL);
 		else
 			g_nCapLastTime = time(NULL);
+
+		if (ClientSocketIsValid())
+		{
+			if (time(NULL) - g_nActiveSocketUpdateTime > 35)
+			{
+				LOGWARN0("Active_socket_update_time do not update more than 35 seconds!Reboot server thread!");
+				printf("Active_socket_update_time do not update more than 35 seconds!Reboot server thread!");
+				RebootServerThread();
+			}
+		}
 		
 		if (time(NULL) - op_log_time > LOG_OP_INTERVAL)
 		{

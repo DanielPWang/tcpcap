@@ -2111,9 +2111,9 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 			nReaded += n;
 			pPlain = realloc(pPlain, nReaded + 5120);
 
-			if (++nRepeatRead >= 200)
+			if (++nRepeatRead >= 150)
 			{
-				LOGWARN0("Time of gzread >= 200! Stop to gzread!");
+				LOGWARN0("Time of gzread >= 150! Stop to gzread!");
 				break;
 			}
 		}

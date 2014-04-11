@@ -41,6 +41,7 @@ void StopServer();
 
 int SetupTCPServer(int server_port);
 int Unblock(int sock);
+int ClientSocketIsValid();
 int WriteSocketData(int sock, const void *pBuffer, int nWriteSize);
 int ReadSocketData(int sock, char *pBuffer, int nReadSize);
 int RecvData(int sock, struct msg_head *pMsgHead, char **pData);
@@ -53,6 +54,8 @@ int ProcessClientCfgSockReq();
 int ProcessServerSockReq();
 int LocalCacheFile();
 void CloseCacheFile();
+int RebootServerThread();
+
 
 #endif
 

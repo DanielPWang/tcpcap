@@ -141,25 +141,28 @@ void ResetOneshot(int nFdIndex)
 	}
 }  
 
-int GetFdEvent()
+int GetFdEvent(int *pFdEventIndexArray)
 {
 	assert(_epollfd > 0);
 	assert(_active_sock > 0);
+	assert(pFdEventIndexArray != NULL);
 
-	int nIndex = -1;
 	int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
 	if (nfds < 1) 
 	{
-		return -2;
+		return -1;
 	}
-	
-	int nFd = _events[0].data.fd;
-	for (int i = 0; i < _active_sock; i++)
+
+	int nIndex = 0;
+	for (int i = 0; i < nfds; i++)
 	{
-		if (nFd == g_arrayActiveFd[i].nFd)
+		int nFd = _events[i].data.fd;
+		for (int j = 0; j < _active_sock; j++)
 		{
-			nIndex = i;
-			break;
+			if (nFd == g_arrayActiveFd[j].nFd)
+			{
+				pFdEventIndexArray[nIndex++] = j;
+			}
 		}
 	}
 	
