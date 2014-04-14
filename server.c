@@ -27,8 +27,7 @@ extern struct hosts_t **_monitor_hosts_array;
 extern uint32_t g_nMonitorHostsPieceCount;
 extern struct hosts_t *_exclude_hosts;
 extern size_t _exclude_hosts_count;
-extern pthread_mutex_t _host_ip_lock;
-extern volatile int g_nFlagIpHostLock;
+extern pthread_mutex_t _host_ip_lock[MONITOR_COUNT];
 
 static int _srv_socket = -1;
 volatile static int _client_socket = -1;
@@ -38,6 +37,7 @@ static char _client_config_ip[16] = {0};
 static time_t _flow_socket_start_time = 0;
 extern int _net_flow_func_on;
 extern int _block_func_on;
+extern int _active_sock;
 
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
@@ -411,9 +411,10 @@ int ProcessReqSetIpList(const char *pRecvData)
 	char *left = NULL, *right = NULL, *ipport = NULL;
 	int n = 0;
 
-	g_nFlagIpHostLock = 1;
-	usleep(300000);
-	pthread_mutex_lock(&_host_ip_lock);
+	for (int i = 0; i < _active_sock; i++)
+	{
+		pthread_mutex_lock(&_host_ip_lock[i]);
+	}
 	
 	nMonHostsLen = *(int*)pRecvData;
 	nMonHostsLen = ntohl(nMonHostsLen);
@@ -499,8 +500,10 @@ int ProcessReqSetIpList(const char *pRecvData)
 			free(pExcludeHostsTmp);
 	}
 
-	pthread_mutex_unlock(&_host_ip_lock);
-	g_nFlagIpHostLock = 0;
+	for (int i = (_active_sock-1); i >= 0; i--)
+	{
+		pthread_mutex_unlock(&_host_ip_lock[i]);
+	}
 	
 	FILE *pFile = NULL;
 	pFile = fopen(HTTP_HOST_PATH_FILE, "w");

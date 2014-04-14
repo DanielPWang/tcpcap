@@ -67,7 +67,7 @@ enum HTTP_SPECIAL_STATE {
 
 // int isHTTP(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int HttpInit();
-int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
+int FilterPacketForHttp(int nFdIndex, const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int IsConfigPort(struct hosts_t *pServer);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
@@ -80,7 +80,7 @@ void StopHttpThread();
 
 void LogDropSessionData(const char *pszDropType, const struct tcp_session *pSession);
 void LogDataItems(const struct tcp_session *pSession, int nState, int nDataSize);
-
+void SessionTimeoutProcess();
 
 
 

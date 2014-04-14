@@ -3,9 +3,10 @@
 
 #define VER_MAJOR 1
 #define VER_MINOR 2
-#define VER_PATCH 6
+#define VER_PATCH 7
 
 #define MONITOR_COUNT 7
+#define MAX_SESSION_THREAD_COUNT 10
 
 // configure
 #define CONFIG_PATH_FILE "/config/agent.conf"
@@ -35,6 +36,7 @@ extern const char* CONFIG_PATH;
 #define FLOW_SEND_INTERVAL_TIME   60
 
 #define LOG_OP_INTERVAL   300
+#define SESSION_TIMEOUT_PROC_INTERVAL   5
 
 // server
 #define SERVER_PORT 2012

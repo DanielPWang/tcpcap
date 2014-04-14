@@ -56,6 +56,5 @@ int LocalCacheFile();
 void CloseCacheFile();
 int RebootServerThread();
 
-
 #endif
 

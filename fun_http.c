@@ -22,8 +22,8 @@
 #include <block.h>
 
 static volatile int _runing = 1;
-static pthread_t _http_thread[10];
-static int _thread_param[10] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+static pthread_t _http_thread[MAX_SESSION_THREAD_COUNT];
+static int _thread_param[MAX_SESSION_THREAD_COUNT] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
 uint32_t g_nThreadCount = 1;
 struct hosts_t *_monitor_hosts = NULL;
@@ -34,19 +34,15 @@ uint32_t g_nMonitorHostsPieceCount = 0;
 struct hosts_t *_exclude_hosts = NULL;
 size_t _exclude_hosts_count = 0;
 
-pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
-
-//static char**  _monitor_uris = NULL;
-//static size_t _monitor_uris_count = 0;
-
-//static char**  _ignore_request = NULL;
-//static size_t _ignore_request_count = 0;
+pthread_mutex_t _host_ip_lock[MONITOR_COUNT] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
+pthread_mutex_t _ile_session_count_lock[MAX_SESSION_THREAD_COUNT] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
+pthread_mutex_t _session_proc_lock[MAX_SESSION_THREAD_COUNT] = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER, PTHREAD_MUTEX_INITIALIZER};
 
 static struct queue_t **_packets_array = NULL;
 
-static int g_nCountWholeContentFull[10] = {0};
-static int g_nDropCountForPacketFull[10] = {0};
-static int g_nDropCountForSessionFull[10] = {0};
+static int g_nCountWholeContentFull[MAX_SESSION_THREAD_COUNT] = {0};
+static int g_nDropCountForPacketFull[MAX_SESSION_THREAD_COUNT] = {0};
+static int g_nDropCountForSessionFull[MAX_SESSION_THREAD_COUNT] = {0};
 static int g_nDropCountForImage = 0;
 static int g_nTimeOutCount = 0;
 static int g_nReusedCount = 0;
@@ -60,13 +56,13 @@ static int g_nChunked = 0;
 static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
 static uint64_t g_nHttpLen = 0;
-static uint64_t g_nPushedPackCount[10] = {0};
-static uint64_t g_nSessionCostTime[10] = {0};
+static uint64_t g_nPushedPackCount[MAX_SESSION_THREAD_COUNT] = {0};
+static uint64_t g_nSessionCostTime[MAX_SESSION_THREAD_COUNT] = {0};
 uint64_t g_nSkippedPackCount = 0;
 
-static int g_nSessionCount[10] = {0};
-static int g_nMaxUsedPackSize[10] = {0};
-static int g_nMaxUsedSessionSize[10] = {0};
+static int g_nSessionCount[MAX_SESSION_THREAD_COUNT] = {0};
+static int g_nMaxUsedPackSize[MAX_SESSION_THREAD_COUNT] = {0};
+static int g_nMaxUsedSessionSize[MAX_SESSION_THREAD_COUNT] = {0};
 static int g_bIsCapRes = 0;
 static int g_bIsSendTimeoutData = 0;
 static int g_bIsSendChannelReusedData = 0;
@@ -102,14 +98,13 @@ static char g_szSpecialClientIp[101] = {0};
 static int g_nSendErrStateDataFlag = 1;
 
 static struct tcp_session **_http_session_array = NULL;	// a session = query + reponse
-static struct queue_t **_idl_session_array = NULL;			// all idl session
+static int *_idl_session_count = NULL;			// all idl session count
 static struct queue_t *_whole_content = NULL;		// http_session.flag = HTTP_SESSION_FINISH
 
 extern volatile int g_nFlagGetData;
 extern volatile int g_nFlagSendData;
 
 extern int _block_func_on;
-volatile int g_nFlagIpHostLock = 0;
 
 // IDL -> REQUESTING -> REQUEST -> REPONSEING -> REPONSE -> FINISH
 //           |------------|------------|------------------> TIMEOUT
@@ -161,7 +156,7 @@ void ShowOpLogInfo(int bIsPrintScreen)
 	int nSessionCount = 0;
 	int nMaxUsedSessionSize = 0;
 	int nMaxUsedPackSize = 0;
-	int nCurSessionUsedCount[10] = {0};
+	int nCurSessionUsedCount[MAX_SESSION_THREAD_COUNT] = {0};
 	int nCurSessionUsedCountAll = 0;
 	uint64_t nSessionCostTime = 0;
 	for (int i = 0; i < g_nThreadCount; i++)
@@ -172,7 +167,7 @@ void ShowOpLogInfo(int bIsPrintScreen)
 		nSessionCount += g_nSessionCount[i];
 		nMaxUsedSessionSize += g_nMaxUsedSessionSize[i];
 		nMaxUsedPackSize += g_nMaxUsedPackSize[i];
-		nCurSessionUsedCount[i] = g_nMaxHttpSessionCount - len_queue(_idl_session_array[i]);
+		nCurSessionUsedCount[i] = g_nMaxHttpSessionCount - _idl_session_count[i];
 		nCurSessionUsedCountAll += nCurSessionUsedCount[i];
 		nSessionCostTime += g_nSessionCostTime[i];
 			
@@ -453,12 +448,54 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 		pSession->thread_index = thread_index;
 		pSession->index = index;
 		pSession->flag = HTTP_SESSION_IDL;
-		
-		push_queue(_idl_session_array[pSession->thread_index], pSession);
+
+		pthread_mutex_lock(&_ile_session_count_lock[pSession->thread_index]);
+		_idl_session_count[pSession->thread_index]++;
+		pthread_mutex_unlock(&_ile_session_count_lock[pSession->thread_index]);
 	}
 
 	LOGDEBUG("Session[%d][%d] end clean!", pSession->thread_index, pSession->index);
 	return pSession;
+}
+
+void SessionTimeoutProcess()
+{
+	struct tcp_session *pSession = NULL;
+	for (int i = 0; i < g_nThreadCount; i++)
+	{
+		pthread_mutex_lock(&_session_proc_lock[i]);
+		for (int j = 0; j < g_nMaxHttpSessionCount; j++) 
+		{
+			pSession = &_http_session_array[i][j];
+			if (pSession->flag == HTTP_SESSION_IDL || pSession->flag == HTTP_SESSION_FINISH) 
+				continue;
+
+			// process timeout
+			if (time(NULL) - pSession->update.tv_sec > g_nHttpTimeout) 
+			{
+				++g_nTimeOutCount;
+				LOGWARN("Session[%d][%d] is timeout. flag=%d res1=%d res2=%d g_nTimeOutCount=%d", i, j, pSession->flag, pSession->res1, pSession->res2, g_nTimeOutCount);
+				LOGINFO("Timeout Session[%d][%d] Request Head Content = %s", i, j, pSession->request_head);
+
+				if (g_bIsLogTimeoutData)
+					LogDropSessionData("Rebuild Failed:Time Out", pSession);
+
+				if (!g_bIsSendTimeoutData)
+					CleanHttpSession(pSession);
+				else
+				{
+					pSession->finish_type = HTTP_SESSION_FINISH_TIMEOUT;
+					pSession->flag = HTTP_SESSION_FINISH;
+					if (push_queue(_whole_content, pSession) < 0)
+					{
+						++g_nCountWholeContentFull[i];
+						LOGWARN("Thread[%d]'s whole content queue is full. count = %d", i, g_nCountWholeContentFull[i]);
+					}
+				}
+			}
+		}
+		pthread_mutex_unlock(&_session_proc_lock[i]);
+	}
 }
 
 int NewHttpSession(int nThreadIndex, const char* packet)
@@ -621,8 +658,11 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 	}
 	
 	// find IDL session
+	int nIdlIndex = -1;
 	struct tcp_session* pIDL = NULL;
 	int index = 0;
+
+	pthread_mutex_lock(&_session_proc_lock[nThreadIndex]);
 	for (; index < g_nMaxHttpSessionCount; ++index) 
 	{
 		if (_http_session_array[nThreadIndex][index].flag != HTTP_SESSION_IDL && 
@@ -634,7 +674,7 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq) 
 			{ // client -> server be reuse.
 				++g_nReusedCount;
-				LOGWARN("session[%d][%d] channel is reused. \n \ 
+				LOGWARN("Session[%d][%d] channel is reused. \n \ 
 							flag=%d, res1=%u, res2=%u, session.seq=%u, session.ack=%u, iphead.seq=%u, iphead.ack=%u; g_nReusedCount=%d", 
 						nThreadIndex, index, pREQ->flag, pREQ->res1, pREQ->res2, 
 						pREQ->seq, pREQ->ack, tcphead->seq, tcphead->ack_seq, g_nReusedCount);
@@ -643,7 +683,12 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 					LogDropSessionData("Rebuild Failed:Channel Reuse", pREQ);
 
 				if (!g_bIsSendChannelReusedData)
+				{
 					CleanHttpSession(pREQ);
+					nIdlIndex = index;
+
+					break;
+				}
 				else
 				{
 					pREQ->finish_type = HTTP_SESSION_FINISH_CHANNEL_REUSED;
@@ -655,38 +700,25 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 					}
 				}
 			} 
-			else if (tv->tv_sec - pREQ->update.tv_sec > g_nHttpTimeout) 
-			{
-				++g_nTimeOutCount;
-				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
-				LOGINFO("Timeout Session[%d][%d] Request Head Content = %s", nThreadIndex, index, pREQ->request_head);
-
-				if (g_bIsLogTimeoutData)
-					LogDropSessionData("Rebuild Failed:Time Out", pREQ);
-
-				if (!g_bIsSendTimeoutData)
-					CleanHttpSession(pREQ);
-				else
-				{
-					pREQ->finish_type = HTTP_SESSION_FINISH_TIMEOUT;
-					pREQ->flag = HTTP_SESSION_FINISH;
-					if (push_queue(_whole_content, pREQ) < 0)
-					{
-						++g_nCountWholeContentFull[nThreadIndex];
-						LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
-					}
-				}
-			} 
-			else 
+			else
 			{
 				continue;
 			}
 		}
+		else if (HTTP_SESSION_IDL == _http_session_array[nThreadIndex][index].flag)
+		{
+			nIdlIndex = index;
+			break;
+		}
 	}
 
-	pIDL = (struct tcp_session*)pop_queue(_idl_session_array[nThreadIndex]);
-	if (pIDL == NULL) 
+	if (nIdlIndex != -1)
+		pIDL = &_http_session_array[nThreadIndex][nIdlIndex];
+	else
+	{
+		pthread_mutex_unlock(&_session_proc_lock[nThreadIndex]);
 		return -2;
+	}
 
 	pIDL->flag = HTTP_SESSION_REQUESTING;
 	pIDL->client.ip.s_addr = iphead->saddr;
@@ -728,7 +760,11 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 		
 	LOGDEBUG("Session[%d][%d]Start request in NewHttpSession, content= %s", pIDL->thread_index, pIDL->index, content);
 
-	int nSessionSize = g_nMaxHttpSessionCount - len_queue(_idl_session_array[nThreadIndex]);
+	pthread_mutex_lock(&_ile_session_count_lock[nThreadIndex]);
+	_idl_session_count[nThreadIndex]--;
+	pthread_mutex_unlock(&_ile_session_count_lock[nThreadIndex]);
+	
+	int nSessionSize = g_nMaxHttpSessionCount - _idl_session_count[nThreadIndex];
 	if (nSessionSize > g_nMaxUsedSessionSize[nThreadIndex])
 	{
 		g_nMaxUsedSessionSize[nThreadIndex] = nSessionSize;
@@ -737,6 +773,7 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 	++g_nSessionCount[nThreadIndex];
 	LOGINFO("Thread[%d]'s Current Session Count = %d , Max Used Session Buffer Size = %d !", nThreadIndex, g_nSessionCount[nThreadIndex], g_nMaxUsedSessionSize[nThreadIndex]);	
 
+	pthread_mutex_unlock(&_session_proc_lock[nThreadIndex]);
 	return index;
 }
 
@@ -1215,6 +1252,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		content = pSession->part_content;
 		contentlen = pSession->part_content_len;
 		strlwr(content);
+		LOGDEBUG("Session[%d][%d], part_content=%s", nThreadIndex, nIndex, content);
 	}
 	
 	if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == pSession->transfer_flag)
@@ -1242,6 +1280,9 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		char *pszChunkedEnd = memmem(content, contentlen, "\r\n0\r\n\r\n", 7);
 		if (pszChunkedEnd == NULL)
 			pszChunkedEnd = memmem(content, contentlen, "\r\n00000000\r\n\r\n", 14);
+
+		if (pszChunkedEnd == NULL)
+			pszChunkedEnd = memmem(content, contentlen, "\r\n0000\r\n\r\n", 10);
 		
 		if (pszChunkedEnd != NULL)
 		{
@@ -1433,6 +1474,8 @@ int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 	struct tcp_session *pREQ = &_http_session_array[nThreadIndex][0];
 
 	int index = 0;
+
+	pthread_mutex_lock(&_session_proc_lock[nThreadIndex]);
 	for (; index < g_nMaxHttpSessionCount; ++index) 
 	{
 		pREQ = &_http_session_array[nThreadIndex][index];
@@ -1440,31 +1483,6 @@ int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 			continue;
 
 		// process timeout
-		if (tv->tv_sec-pREQ->update.tv_sec > g_nHttpTimeout) 
-		{
-			++g_nTimeOutCount;
-			LOGWARN("One http_session is timeout. tv->tv_sec=%d pREQ->update.tv_sec=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update.tv_sec, pREQ->flag, index, pREQ->res1, pREQ->res2, g_nTimeOutCount);
-			LOGINFO("Timeout Session[%d][%d] Request Head Content = %s", nThreadIndex, index, pREQ->request_head);
-
-			if (g_bIsLogTimeoutData)
-				LogDropSessionData("Rebuild Failed:Time Out", pREQ);
-
-			if (!g_bIsSendTimeoutData)
-				CleanHttpSession(pREQ);
-			else
-			{
-				pREQ->finish_type = HTTP_SESSION_FINISH_TIMEOUT;
-				pREQ->flag = HTTP_SESSION_FINISH;
-				if (push_queue(_whole_content, pREQ) < 0)
-				{
-					++g_nCountWholeContentFull[nThreadIndex];
-					LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
-				}
-			}
-			
-			continue;
-		}
-
 		int nRs = 0;
 		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
 			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) // server -> client
@@ -1475,7 +1493,10 @@ int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 				AppendLaterPacket(nThreadIndex, index);
 			}
 			else if (nRs == HTTP_APPEND_DROP_PACKET)
+			{
+				pthread_mutex_unlock(&_session_proc_lock[nThreadIndex]);
 				return nRs;	
+			}
 			
 			break;
 		}
@@ -1484,7 +1505,10 @@ int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 		{ 
 			nRs = AppendClientToServer(nThreadIndex, index, packet);
 			if (nRs == HTTP_APPEND_DROP_PACKET)
+			{
+				pthread_mutex_unlock(&_session_proc_lock[nThreadIndex]);
 				return nRs;	
+			}
 			
 			break;
 		} 
@@ -1498,6 +1522,8 @@ int AppendReponse(int nThreadIndex, const char* packet, int bIsCurPack)
 					inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest));
 		}
 	}
+	pthread_mutex_unlock(&_session_proc_lock[nThreadIndex]);
+	
 	if (index == g_nMaxHttpSessionCount) 
 	{
 		char stip[20], dtip[20];
@@ -1628,7 +1654,7 @@ int HttpInit()
 	char szThreadCount[10] = {0};
 	GetValue(CONFIG_PATH, "thread_count", szThreadCount, 4);
 	g_nThreadCount = atoi(szThreadCount);
-	if (g_nThreadCount < 1 || g_nThreadCount > 10)
+	if (g_nThreadCount < 1 || g_nThreadCount > MAX_SESSION_THREAD_COUNT)
 		g_nThreadCount = 1;
 
 	printf("thread_count = %d\n", g_nThreadCount);
@@ -1728,18 +1754,17 @@ int HttpInit()
 	}
 	ASSERT(_http_session_array != NULL);
 
-	_idl_session_array = (struct queue_t **)calloc(sizeof(struct queue_t*), g_nThreadCount);
+	_idl_session_count = (int *)calloc(sizeof(int), g_nThreadCount);
 	for (int i = 0; i < g_nThreadCount; i++)
 	{
-		_idl_session_array[i] = init_queue(g_nMaxHttpSessionCount);
+		_idl_session_count[i] = g_nMaxHttpSessionCount;
 		for (size_t index = 0; index < g_nMaxHttpSessionCount; ++index)
 		{
 			_http_session_array[i][index].thread_index = i;
 			_http_session_array[i][index].index = index;
-			push_queue(_idl_session_array[i], &_http_session_array[i][index]);
 		}
 	}
-	ASSERT(_idl_session_array != NULL);
+	ASSERT(_idl_session_count != NULL);
 		
 	_whole_content = init_queue(g_nMaxHttpSessionCount*g_nThreadCount);
 	ASSERT(_whole_content != NULL);
@@ -1793,11 +1818,7 @@ void StopHttpThread()
 	
 	destory_queue(_whole_content);
 
-	for (int i = 0; i < g_nThreadCount; i++)
-	{
-		destory_queue(_idl_session_array[i]);
-	}
-	free(_idl_session_array);
+	free(_idl_session_count);
 }
 
 int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
@@ -1865,12 +1886,11 @@ int PushHttpPack(int nThreadIndex, const char* buffer, const struct iphdr* iphea
 }
 
 /// buffer is http return 0. other return -1;
-int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
+int FilterPacketForHttp(int nFdIndex, const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
 {
 	int nRs = 0;
 
-	if (g_nFlagIpHostLock)
-		pthread_mutex_lock(&_host_ip_lock);
+	pthread_mutex_lock(&_host_ip_lock[nFdIndex]);
 
 	int nThreadIndex = 0;
 	nThreadIndex = inHosts(buffer, iphead, tcphead);
@@ -1902,9 +1922,8 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 		}
 	}
 
-	if (g_nFlagIpHostLock)
-		pthread_mutex_unlock(&_host_ip_lock);
-	
+	pthread_mutex_unlock(&_host_ip_lock[nFdIndex]);
+		
 	return nRs;
 }
 

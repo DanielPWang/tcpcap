@@ -143,7 +143,7 @@ void *capture_thread(void* param)
 					struct tcphdr *tcphead = TCPHDR(iphead);
 
 					// Http filter.
-					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
+					if (FilterPacketForHttp(nFdIndex, buffer, iphead, tcphead) == 0) 
 						break;
 				}
 				else
@@ -266,6 +266,7 @@ int main(int argc, char* argv[])
 	ASSERT(err==0);
 		
 	time_t op_log_time = time(NULL);
+	time_t session_timeout_proc_time = time(NULL);
 	while (Living) 
 	{
 		if (0 == g_nCapFisrtTime)
@@ -281,6 +282,12 @@ int main(int argc, char* argv[])
 				printf("Active_socket_update_time do not update more than 35 seconds!Reboot server thread!");
 				RebootServerThread();
 			}
+		}
+		
+		if (time(NULL) - session_timeout_proc_time > SESSION_TIMEOUT_PROC_INTERVAL)
+		{
+			SessionTimeoutProcess();
+			session_timeout_proc_time = time(NULL);
 		}
 		
 		if (time(NULL) - op_log_time > LOG_OP_INTERVAL)
