@@ -1011,7 +1011,8 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			if (strncmp(content_type+14, "text/html", 9) == 0 
 				|| strncmp(content_type+14, "text/xml", 8) == 0 
 				|| strncmp(content_type+14, "text/plain", 10) == 0
-				|| strncmp(content_type+14, "application/x-ami", 17) == 0)
+				|| strncmp(content_type+14, "application/x-ami", 17) == 0
+				|| strncmp(content_type+14, "text/javascript", 15) == 0)
 			{
 				pSession->content_type = HTTP_CONTENT_HTML;
 			}
