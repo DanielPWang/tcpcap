@@ -6,6 +6,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <pthread.h>
 
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
@@ -31,10 +32,13 @@ volatile int NeedReloadConfig = 0;
 int _net_flow_func_on = 0;
 int _block_func_on = 0;
 
+extern InterfaceFdDef g_arrayActiveFd[MONITOR_COUNT];
 int g_nActiveFd[MONITOR_COUNT] = {0};
 uint64_t g_nPreCapCount[MONITOR_COUNT] = {0};
 uint64_t g_nCapCount[MONITOR_COUNT] = {0};
 uint64_t g_nCapSize[MONITOR_COUNT] = {0};
+uint64_t g_nValidCapCount[MONITOR_COUNT] = {0};
+uint64_t g_nValidCapSize[MONITOR_COUNT] = {0};
 uint32_t g_nCapFisrtTime = 0;
 uint32_t g_nCapLastTime = 0;
 extern uint64_t g_nSkippedPackCount;
@@ -85,6 +89,9 @@ void ShowUsage(int nExit)
 
 void *capture_thread(void* param)
 {
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+	
 	int nFdIndex = *(int*)param;
 
 	g_nActiveFd[nFdIndex] = 1;
@@ -143,7 +150,7 @@ void *capture_thread(void* param)
 					struct tcphdr *tcphead = TCPHDR(iphead);
 
 					// Http filter.
-					if (FilterPacketForHttp(nFdIndex, buffer, iphead, tcphead) == 0) 
+					if (FilterPacketForHttp(nFdIndex, buffer, nrecv, iphead, tcphead) == 0) 
 						break;
 				}
 				else
@@ -276,10 +283,10 @@ int main(int argc, char* argv[])
 
 		if (ClientSocketIsValid())
 		{
-			if (time(NULL) - g_nActiveSocketUpdateTime > 35)
+			if (time(NULL) - g_nActiveSocketUpdateTime > 40)
 			{
-				LOGWARN0("Active_socket_update_time do not update more than 35 seconds!Reboot server thread!");
-				printf("Active_socket_update_time do not update more than 35 seconds!Reboot server thread!");
+				LOGWARN0("Active_socket_update_time do not update more than 40 seconds!Reboot server thread!");
+				//printf("Active_socket_update_time do not update more than 40 seconds!Reboot server thread!");
 				RebootServerThread();
 			}
 		}
@@ -303,6 +310,7 @@ int main(int argc, char* argv[])
 					{
 						if (g_nCapCount[i] == g_nPreCapCount[i])
 						{
+							LOGINFO("Capture if %s get no data for 5 minutes! Stop capture thread!", g_arrayActiveFd[i].szInterface);
 							pthread_cancel(_capture_thread[i]);
 							g_nPreCapCount[i] = 0;
 							g_nActiveFd[i] = 0;

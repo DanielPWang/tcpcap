@@ -921,6 +921,9 @@ int ClientSocketIsValid()
 
 void* server_thread(void* p)
 {
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+	
 	char szPort[10] = {0};
 	GetValue(CONFIG_PATH, "server_port", szPort, 6);
 	int nPort = atoi(szPort);
@@ -1170,8 +1173,10 @@ int StartServer()
 
 int RebootServerThread()
 {
+	LOGINFO0("Cancel server thread...");
 	pthread_cancel(_srv_thread);
 
+	LOGINFO0("Close all sockets...");
 	shutdown(_srv_socket, SHUT_RDWR);
 	close(_srv_socket);
 	if (_client_socket > 0)
@@ -1186,6 +1191,7 @@ int RebootServerThread()
 		_client_config_socket = -1;
 	}
 
+	LOGINFO0("Reboot server thread...");
 	sleep(3);
 	int nerr = pthread_create(&_srv_thread, NULL, &server_thread, NULL);
 	return nerr;

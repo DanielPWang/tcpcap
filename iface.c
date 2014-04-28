@@ -139,6 +139,8 @@ void ResetOneshot(int nFdIndex)
     {
 		LOGERROR0("ResetOneshot error!");
 	}
+
+	LOGINFO("ResetOneshot finish, if is %s.", g_arrayActiveFd[nFdIndex].szInterface);
 }  
 
 int GetFdEvent(int *pFdEventIndexArray)
