@@ -46,6 +46,7 @@ extern uint32_t g_nThreadCount;
 static int _thread_param[MONITOR_COUNT] = {0, 1, 2, 3, 4, 5, 6};
 extern int _active_sock;
 extern time_t g_nActiveSocketUpdateTime;
+extern time_t g_nServerThreadUpdateTime;
 
 const char *MonitorFilter;
 const char* CONFIG_PATH;
@@ -281,6 +282,7 @@ int main(int argc, char* argv[])
 		else
 			g_nCapLastTime = time(NULL);
 
+		/*
 		if (ClientSocketIsValid())
 		{
 			if (time(NULL) - g_nActiveSocketUpdateTime > 40)
@@ -289,6 +291,13 @@ int main(int argc, char* argv[])
 				//printf("Active_socket_update_time do not update more than 40 seconds!Reboot server thread!");
 				RebootServerThread();
 			}
+		}
+		*/
+		
+		if (time(NULL) - g_nServerThreadUpdateTime > 40)
+		{
+			LOGWARN0("Server_thread_update_time do not update more than 40 seconds!Reboot server thread!");
+			RebootServerThread();
 		}
 		
 		if (time(NULL) - session_timeout_proc_time > SESSION_TIMEOUT_PROC_INTERVAL)

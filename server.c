@@ -42,6 +42,7 @@ extern int _active_sock;
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
 time_t g_nActiveSocketUpdateTime = 0;
+time_t g_nServerThreadUpdateTime = 0;
 
 volatile int g_nFlagGetData = 0;
 volatile int g_nFlagSendData = 0;
@@ -946,6 +947,7 @@ thread_start:
 	int retval = 0;
 	int max_socket = 0;
 	g_nActiveSocketUpdateTime = time(NULL);
+	g_nServerThreadUpdateTime = time(NULL);
 	
 	while (_runing) 
 	{
@@ -1014,6 +1016,11 @@ thread_start:
 		else
 		{
 			LocalCacheFile();
+		}
+
+		if (time(NULL) - g_nServerThreadUpdateTime > 10) 
+		{
+			g_nServerThreadUpdateTime = time(NULL);
 		}
 	}
 

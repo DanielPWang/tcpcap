@@ -804,6 +804,7 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 	pIDL->res0 = contentlen;
 	pIDL->res1 = 0;
 	pIDL->res2 = 0;
+	pIDL->res_true_len = 0;
 	pIDL->transfer_flag = HTTP_TRANSFER_INIT;
 	pIDL->response_head_recv_flag = 0;
 	pIDL->content_encoding_gzip = 0;
@@ -1089,6 +1090,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		else
 		{
 			pSession->res2 += (!nIsForceRestoreSuc) ? contentlen : nForceRestoreContentLen;
+			pSession->res_true_len += contentlen;
 			LOGTRACE("Session[%d][%d] part_reponse_len = %u/%u", nThreadIndex, nIndex, pSession->res2, pSession->res1);
 		}
 	}
@@ -1304,6 +1306,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 				if ((tmp = memmem(content, contentlen, "\r\n\r\n", 4)) != NULL) 
 				{
 					pSession->res2 = contentlen - (tmp-content) - 4;
+					pSession->res_true_len = pSession->res2;
 				}
 			}
 			else
@@ -2321,12 +2324,11 @@ int GetHttpData(char **data)
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 		http_len += contentlen;
-		//const char *content = (void*)tcphead + tcphead->doff*4;
 		packet = *(void**)packet;
 	} while (packet!=NULL);
 
 	g_nHttpLen += http_len;
-	LOGINFO("Current http data len = %llu Bytes!", g_nHttpLen);
+	LOGINFO("Total http data len = %llu Bytes, Current http data len = %u Bytes!", g_nHttpLen, http_len);
 
 	int nPortOffsite = 0;
 	int bIsConfigPort = IsConfigPort(&pSession->server);
@@ -2657,7 +2659,8 @@ int GetHttpData(char **data)
 		}
 		else if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == transfer_flag)
 		{
-			nContentLength = pSession->res1;
+			LOGDEBUG("Session[%d][%d] with TRANSFER_HAVE_CONTENT_LENGTH, true len = %d, res1 = %d", pSession->thread_index, pSession->index, pSession->res_true_len, pSession->res1);
+			nContentLength = pSession->res_true_len;
 		}
 		else if (HTTP_TRANSFER_FILE == transfer_flag)
 		{
