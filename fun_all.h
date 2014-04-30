@@ -23,6 +23,7 @@ struct tcp_session
 	unsigned content_encoding_gzip;	   // 1:gzip; 0:no encoding
 	unsigned content_type;			   // 0:no match; 1:html; 2:file
 	unsigned finish_type;
+	unsigned force_restore_flag;
 	unsigned res0;
 	unsigned res1;
 	unsigned res2;

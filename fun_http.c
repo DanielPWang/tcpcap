@@ -809,6 +809,7 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 	pIDL->response_head_recv_flag = 0;
 	pIDL->content_encoding_gzip = 0;
 	pIDL->content_type = init_content_type;
+	pIDL->force_restore_flag = 0;
 	pIDL->response_head = NULL;
 	pIDL->response_head_gen_time = 0;
 	pIDL->response_head_len = 0;
@@ -1009,6 +1010,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 
 				if (nIsForceRestoreSuc)
 				{
+					pSession->force_restore_flag = 1;
 					LOGDEBUG("Session[%d][%d] S->C packet[Force restore]. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
 								nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 				}
@@ -2544,13 +2546,64 @@ int GetHttpData(char **data)
 			else
 			{
 				pOldContent += 4;
-				
-				char* pTmpContent = pOldContent;
+
+				char *pFind = NULL, *pEnd = NULL, *pTmpPart = NULL;
+				char *pTmpContent = pOldContent;
 				while (pTmpContent < http_content+data_len)
 				{
-					int nChunkLen = strtol(pTmpContent, NULL, 16);
+					pEnd = NULL;
+					int nChunkLen = strtol(pTmpContent, &pEnd, 16);
 					if (nChunkLen > 0)
 					{
+						pFind = memmem(pEnd, 2, "\r\n", 2);
+						if (pFind != NULL)
+						{
+							pTmpContent = pEnd;
+							if (!pSession->force_restore_flag)
+							{
+								nContentLength += nChunkLen;
+								pTmpContent += 2+nChunkLen+2;
+							}
+							else
+							{
+								pTmpPart = pTmpContent+2;
+								pFind = memmem(pTmpPart, nChunkLen, "\r\n", 2);
+								if (pFind != NULL)
+								{
+									nContentLength += pFind-pTmpPart;
+									pTmpContent = pFind+2;	
+								}
+								else
+								{
+									nContentLength += nChunkLen;
+									pTmpContent += 2+nChunkLen;
+									pFind = memmem(pTmpContent, 2, "\r\n", 2);
+									if (pFind != NULL)
+									{
+										pTmpContent += 2;
+									}
+									else
+									{
+										pFind = memmem(pTmpContent, data_len-(pTmpContent-http_content), "\r\n", 2);
+										if (pFind != NULL)
+										{
+											pTmpContent = pFind+2;
+										}
+										else
+										{
+											nContentLength = 0;
+											break;
+										}
+									}
+								}
+							}
+						}
+						else
+						{
+							nContentLength = 0;
+							break;
+						}
+						/*
 						pTmpContent = strstr(pTmpContent, "\r\n");
 						if (pTmpContent != NULL)
 						{
@@ -2562,16 +2615,29 @@ int GetHttpData(char **data)
 							nContentLength = 0;
 							break;
 						}
+						*/
 					}
-					else if (nChunkLen == 0)
+					else if (0 == nChunkLen)
 					{
+						pFind = memmem(pEnd, 4, "\r\n\r\n", 4);
+						if (NULL == pFind)
+						{
+							LOGWARN("Session[%d][%d] fail to get end of chunk data. nContentLength=%d", pSession->thread_index, pSession->index, nContentLength);
+							nContentLength = 0;
+						}
+						else
+						{
+							pTmpContent = pEnd + 4;
+						}
+							
+						/*
 						pTmpContent = strstr(pTmpContent, "\r\n\r\n");
 						if (pTmpContent == NULL)
 						{
 							LOGWARN("Session[%d][%d] fail to get end of chunk data. nContentLength=%d", pSession->thread_index, pSession->index, nContentLength);
 							nContentLength = 0;
 						}
-						
+						*/
 						break;
 					}
 					else
@@ -2583,7 +2649,7 @@ int GetHttpData(char **data)
 				}
 
 				LOGDEBUG("Calculate the chunk size = %d", nContentLength);
-				if (pTmpContent >= http_content+data_len)
+				if (pTmpContent > http_content+data_len)
 				{
 					nContentLength = 0;
 					LOGERROR("Session[%d][%d] fail to calculate the chunk size!", pSession->thread_index, pSession->index);
@@ -2602,6 +2668,7 @@ int GetHttpData(char **data)
 						pTmpContent = pOldContent;
 						while (pTmpContent < http_content+data_len)
 						{
+							/*
 							int nChunkLen = strtol(pTmpContent, NULL, 16);
 							if (nChunkLen > 0)
 							{
@@ -2612,6 +2679,56 @@ int GetHttpData(char **data)
 							}
 							else if (nChunkLen == 0)
 								break;
+							*/
+
+							pEnd = NULL;
+							int nChunkLen = strtol(pTmpContent, &pEnd, 16);
+							if (nChunkLen > 0)
+							{
+								pFind = memmem(pEnd, 2, "\r\n", 2);
+								if (pFind != NULL)
+								{
+									pTmpContent = pEnd;
+									if (!pSession->force_restore_flag)
+									{
+										memcpy(pChunkContent+nOffset, pTmpContent+2, nChunkLen);
+										pTmpContent += 2+nChunkLen+2;
+										nOffset += nChunkLen;
+									}
+									else
+									{
+										pTmpPart = pTmpContent+2;
+										pFind = memmem(pTmpPart, nChunkLen, "\r\n", 2);
+										if (pFind != NULL)
+										{
+											int nTmpLen = pFind-pTmpPart;
+											memcpy(pChunkContent+nOffset, pTmpContent+2, nTmpLen);
+											nOffset += nTmpLen;
+											pTmpContent = pFind+2;	
+										}
+										else
+										{
+											memcpy(pChunkContent+nOffset, pTmpContent+2, nChunkLen);
+											nOffset += nChunkLen;
+										
+											pTmpContent += 2+nChunkLen;
+											pFind = memmem(pTmpContent, 2, "\r\n", 2);
+											if (pFind != NULL)
+											{
+												pTmpContent += 2;
+											}
+											else
+											{
+												pFind = memmem(pTmpContent, data_len-(pTmpContent-http_content), "\r\n", 2);
+												if (pFind != NULL)
+												{
+													pTmpContent = pFind+2;
+												}
+											}
+										}
+									}
+								}
+							}
 						}
 
 						pChunkContent[nOffset] = '\0';
