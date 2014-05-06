@@ -258,6 +258,7 @@ int main(int argc, char* argv[])
 		FlowInit();
 	
 	// start server
+	g_nServerThreadUpdateTime = time(NULL);
 	int nerr = StartServer();
 	ASSERT(nerr == 0);
 

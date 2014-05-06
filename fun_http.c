@@ -2078,7 +2078,8 @@ int IsConfigPort(struct hosts_t *pServer)
 {
 	if (NULL == _monitor_hosts)
 		return -1;
-	
+
+	int nRs = 0;
 	for (int npos = 0; npos < _monitor_hosts_count; npos++)
 	{
 		struct hosts_t *tmp = &_monitor_hosts[npos];
@@ -2088,13 +2089,11 @@ int IsConfigPort(struct hosts_t *pServer)
 		if (tmp->ip.s_addr == pServer->ip.s_addr)
 		{
 			if (tmp->port == pServer->port)
-				return 1;
-			else
-				return 0;
+				nRs = 1;
 		}
 	}
 
-	return 0;
+	return nRs;
 }
 
 
