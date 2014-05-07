@@ -27,6 +27,7 @@
 static pthread_t _epoll_thread;
 static pthread_t _capture_thread[MONITOR_COUNT];
 int SockManager;
+int nTerm = 0;
 volatile int Living = 1;
 volatile int NeedReloadConfig = 0;
 int _net_flow_func_on = 0;
@@ -53,11 +54,20 @@ const char* CONFIG_PATH;
 
 void sig_int(int signo)
 {
+	nTerm = 0;
+	Living = 0;
+}
+
+void sig_term(int signo)
+{
+	LOGERROR0("Resv SIGTERM!");
+	nTerm = 1;
 	Living = 0;
 }
 
 void sig_segv(int signo)
 {
+	LOGERROR0("Resv SIGSEGV!");
 	print_bt();
 	exit(-1);
 }
@@ -72,7 +82,6 @@ int LoadConfig(const char* confPath)
 	NeedReloadConfig = 0;
 	return 1;
 }
-
 
 void ShowVersion()
 {
@@ -217,6 +226,7 @@ int main(int argc, char* argv[])
 
 	// signal somethings
 	signal(SIGSEGV, sig_segv);
+	signal(SIGTERM, sig_term);
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGINT,  sig_int);
@@ -338,7 +348,7 @@ int main(int argc, char* argv[])
 		sleep(1);
 	}
 
-	ShowOpLogInfo(1);
+	ShowOpLogInfo(!nTerm);
 	LOGFIX0("Ready to exit...");
 	LOGFIX0("Stop Server Thread...");
 	StopServer();

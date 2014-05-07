@@ -2372,7 +2372,7 @@ int GetHttpData(char **data)
 	do 
 	{
 		struct iphdr *iphead = IPHDR(packet);
-		struct tcphdr *tcphead=TCPHDR(iphead);
+		struct tcphdr *tcphead = TCPHDR(iphead);
 		unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 		if (contentlen > RECV_BUFFER_LEN) 
 		{

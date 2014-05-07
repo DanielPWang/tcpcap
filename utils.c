@@ -690,9 +690,21 @@ void CheckLogFullDays(const char *pszFolder, int nFullDays)
 
 void print_bt()
 {
-	void* frameptr[20];
-	int nFrames = backtrace(frameptr, 20);
-	backtrace_symbols_fd(&frameptr[2], nFrames-2, STDERR_FILENO);
+	void *frameptr[10];
+	char **pStrings;
+	int nFrames = backtrace(frameptr, 10);
+	pStrings = backtrace_symbols(frameptr, nFrames);
+	if (pStrings != NULL)
+	{
+		for (int i = 0; i < nFrames; i++)
+		{
+			LOGERROR("%s", pStrings[i]);
+		}
+		free(pStrings);
+		pStrings = NULL;
+	}
+	
+	//backtrace_symbols_fd(frameptr, nFrames, STDERR_FILENO);
 }
 
 ////////// fixed-length queue
