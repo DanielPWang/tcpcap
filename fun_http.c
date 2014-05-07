@@ -2478,12 +2478,15 @@ int GetHttpData(char **data)
 		{
 			case HTTP_SESSION_FINISH_TIMEOUT:
 				nHttpcode = HTTP_SPECIAL_STATE_TIMEOUT;
+				LOGWARN("Session[%d][%d] finish to get data with timeout!", pSession->thread_index, pSession->index);
 				break;
 			case HTTP_SESSION_FINISH_CHANNEL_REUSED:
 				nHttpcode = HTTP_SPECIAL_STATE_CHANNEL_REUSED;
+				LOGWARN("Session[%d][%d] finish to get data with channel reused!", pSession->thread_index, pSession->index);
 				break;
 			case HTTP_SESSION_FINISH_DISORDER_REBUILD_FAILED:
 				nHttpcode = HTTP_SPECIAL_STATE_DISORDER_REBUILD_FAILED;
+				LOGWARN("Session[%d][%d] finish to get data with rebuild failed!", pSession->thread_index, pSession->index);
 				break;
 		}
 		sprintf(http_content+35, "STATE=%03d", nHttpcode);
