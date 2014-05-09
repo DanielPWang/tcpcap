@@ -1683,6 +1683,9 @@ int AppendReponse(int nThreadIndex, const char* packet)
 
 void *HTTP_Thread(void* param)
 {
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+	
 	int nThreadIndex = *(int*)param;
 	while (_runing)
 	{
@@ -2287,8 +2290,18 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 	gzclose(p);
 	unlink(gzfile);
 	LOGDEBUG("TransGzipData finish. Read data length = %d, plain length = %d", nReaded, plain_len);
+
+	if (nReaded > 0)
+		*pTransData = pPlain;
+	else
+	{
+		if (pPlain != NULL)
+		{
+			free(pPlain);
+			pPlain = NULL;
+		}
+	}
 	
-	*pTransData = pPlain;
 	return nReaded;
 }
 
@@ -2779,7 +2792,7 @@ int GetHttpData(char **data)
 		else if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == transfer_flag)
 		{
 			LOGDEBUG("Session[%d][%d] with TRANSFER_HAVE_CONTENT_LENGTH, true len = %d, res1 = %d", pSession->thread_index, pSession->index, pSession->res_true_len, pSession->res1);
-			nContentLength = pSession->res_true_len;
+			nContentLength = (pSession->res_true_len > pSession->res1) ? pSession->res1 : pSession->res_true_len;
 		}
 		else if (HTTP_TRANSFER_FILE == transfer_flag)
 		{
@@ -2879,29 +2892,36 @@ int GetHttpData(char **data)
 						++g_nGzipCount;
 						int nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain);
 						LOGDEBUG("Session[%d][%d] transGzipData finish, nUnzipLen = %d", pSession->thread_index, pSession->index, nUnzipLen);
-						if (nUnzipLen != -1)
+						if (nUnzipLen > 0)
 						{
 							int new_data_len = data_len+(nUnzipLen-nContentLength);
-							char* new_http_content = calloc(1, new_data_len);
-							if (new_http_content != NULL) 
+							if ((content-http_content+nUnzipLen+1) <= new_data_len)
 							{
-								int npos = content - http_content;
-								memcpy(new_http_content, http_content, npos);
-								memcpy(new_http_content+npos, pPlain, nUnzipLen);
-								npos += nUnzipLen;
-								new_http_content[npos] = '\0';
-								free(pPlain);
-								pPlain = NULL;
-								free(http_content);
-								data_len = npos+1;
-								http_content = new_http_content;
+								char* new_http_content = calloc(1, new_data_len);
+								if (new_http_content != NULL) 
+								{
+									int npos = content - http_content;
+									memcpy(new_http_content, http_content, npos);
+									memcpy(new_http_content+npos, pPlain, nUnzipLen);
+									npos += nUnzipLen;
+									new_http_content[npos] = '\0';
+									free(pPlain);
+									pPlain = NULL;
+									free(http_content);
+									data_len = npos+1;
+									http_content = new_http_content;
 
-								LOGDEBUG("Session[%d][%d] upzipData recombine finish", pSession->thread_index, pSession->index);
+									LOGDEBUG("Session[%d][%d] upzipData recombine finish", pSession->thread_index, pSession->index);
+								}
+								else
+								{
+									LOGERROR("cannt calloc() new_data, %s", strerror(errno));
+									//goto NOZIP;
+								}
 							}
 							else
 							{
-								LOGERROR("cannt calloc() new_data, %s", strerror(errno));
-								//goto NOZIP;
+								LOGERROR("New data len after TransGzipData is error! new_data_len=%d, acturely_data_len=%d", new_data_len, (content-http_content+nUnzipLen+1));
 							}
 						}
 						else

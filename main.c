@@ -69,6 +69,7 @@ void sig_segv(int signo)
 {
 	LOGERROR0("Resv SIGSEGV!");
 	print_bt();
+	Living = 0;
 	exit(-1);
 }
 
