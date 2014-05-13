@@ -67,9 +67,9 @@ void sig_term(int signo)
 
 void sig_segv(int signo)
 {
-	LOGERROR0("Resv SIGSEGV!");
-	print_bt();
-	Living = 0;
+	//LOGERROR0("Resv SIGSEGV!");
+	//print_bt();
+	//Living = 0;
 	exit(-1);
 }
 
@@ -226,7 +226,7 @@ int main(int argc, char* argv[])
 	}
 
 	// signal somethings
-	signal(SIGSEGV, sig_segv);
+	//signal(SIGSEGV, sig_segv);
 	signal(SIGTERM, sig_term);
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
