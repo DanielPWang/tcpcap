@@ -6,7 +6,6 @@
 //#define _LARGEFILE64_SOURCE 
 //#define _FILE_OFFSET_BITS 64
 #define CACHE_FILE_FOLDER "./cachefiles/"
-#define DEFAULT_FILE_SIZE (1024*1024*1024*2)
 #define FILE_HEAD_LEN 31
 
 typedef struct CacheFile 

@@ -603,23 +603,23 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 	*enter = tmp;
 
 	unsigned init_content_type = HTTP_CONTENT_NONE;
-	char* pTmpContent[RECV_BUFFER_LEN] = {0};
+	char pTmpContent[RECV_BUFFER_LEN] = {0};
 	memcpy(pTmpContent, content, contentlen);
 	pTmpContent[contentlen] = '\0';
 	strlwr(pTmpContent);
 	
 	if (!g_bIsCapRes)
 	{
-		if ((memmem(pTmpContent, contentlen, ".gif ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".js ", 4) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".js?", 4) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".css ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".jpg ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".ico ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".bmp ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".png ", 5) != NULL))
-			//|| (memmem(pTmpContent, contentlen, ".tif ", 5) != NULL)
-			//|| (memmem(pTmpContent, contentlen, ".tiff ", 6) != NULL))
+		if (((void*)memmem(pTmpContent, contentlen, ".gif ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".js ", 4) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".js?", 4) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".css ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".jpg ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".ico ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".bmp ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".png ", 5) != NULL))
+			//|| ((void*)memmem(pTmpContent, contentlen, ".tif ", 5) != NULL)
+			//|| ((void*)memmem(pTmpContent, contentlen, ".tiff ", 6) != NULL))
 		{
 			if (is_log_drop_data())
 			{
@@ -630,16 +630,16 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 				inet_ntop(AF_INET, &iphead->daddr, dip, 20);
 
 				int nStart = 5;
-				char *pszUrlStart = memmem(content, contentlen, "POST ", 5);
+				char *pszUrlStart = (char*)memmem(content, contentlen, "POST ", 5);
 				if (NULL == pszUrlStart)
 				{
-					pszUrlStart = memmem(content, contentlen, "GET ", 4);
+					pszUrlStart = (char*)memmem(content, contentlen, "GET ", 4);
 					nStart = 4;
 				}
 				
-				char *pszUrlEnd = memmem(content, contentlen, " HTTP/1.1", 9);
+				char *pszUrlEnd = (char*)memmem(content, contentlen, " HTTP/1.1", 9);
 				if (NULL == pszUrlEnd)
-					pszUrlEnd = memmem(content, contentlen, " HTTP/1.0", 9);
+					pszUrlEnd = (char*)memmem(content, contentlen, " HTTP/1.0", 9);
 
 				if ((pszUrlStart != NULL) && (pszUrlEnd != NULL))
 				{
@@ -651,7 +651,7 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 				{
 					if (strstr(szUrlBody, "http://") == NULL)
 					{
-						char *pszHost = memmem(content, contentlen, "Host: ", 6);
+						char *pszHost = (char*)memmem(content, contentlen, "Host: ", 6);
 						if (pszHost != NULL)
 						{
 							strcpy(szUrl, "Http://");
@@ -712,16 +712,16 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 	}
 	else
 	{
-		if ((memmem(pTmpContent, contentlen, ".gif ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".js ", 4) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".js?", 4) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".css ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".jpg ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".ico ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".bmp ", 5) != NULL)
-			|| (memmem(pTmpContent, contentlen, ".png ", 5) != NULL))
-			//|| (memmem(pTmpContent, contentlen, ".tif ", 5) != NULL)
-			//|| (memmem(pTmpContent, contentlen, ".tiff ", 6) != NULL))
+		if (((void*)memmem(pTmpContent, contentlen, ".gif ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".js ", 4) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".js?", 4) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".css ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".jpg ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".ico ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".bmp ", 5) != NULL)
+			|| ((void*)memmem(pTmpContent, contentlen, ".png ", 5) != NULL))
+			//|| ((void*)memmem(pTmpContent, contentlen, ".tif ", 5) != NULL)
+			//|| ((void*)memmem(pTmpContent, contentlen, ".tiff ", 6) != NULL))
 		{
 			init_content_type = HTTP_CONTENT_RES;
 		}
@@ -744,7 +744,7 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq) 
 			{ // client -> server be reuse.
 				++g_nReusedCount;
-				LOGWARN("Session[%d][%d] channel is reused. \n \ 
+				LOGWARN("Session[%d][%d] channel is reused. \n \
 							flag=%d, res1=%u, res2=%u, session.seq=%u, session.ack=%u, iphead.seq=%u, iphead.ack=%u; g_nReusedCount=%d", 
 						nThreadIndex, index, pREQ->flag, pREQ->res1, pREQ->res2, 
 						pREQ->seq, pREQ->ack, tcphead->seq, tcphead->ack_seq, g_nReusedCount);
@@ -868,9 +868,9 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		{
 			LOGDEBUG("S->C packet for first response. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
 					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-			char *pszCode = memmem(content, contentlen, "HTTP/1.1 100", 12);
+			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);
 			if (pszCode == NULL)
-				pszCode = memmem(content, contentlen, "HTTP/1.0 100", 12);
+				pszCode = (char*)memmem(content, contentlen, "HTTP/1.0 100", 12);
 
 			if (pszCode != NULL)
 			{
@@ -1066,7 +1066,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		memcpy(pSession->response_head, content, contentlen);
 		pSession->response_head_len = contentlen+1;
 		pSession->response_head_gen_time++;
-		if (memmem(content, contentlen, "\r\n\r\n", 4) != NULL)
+		if ((void*)memmem(content, contentlen, "\r\n\r\n", 4) != NULL)
 		{
 			pSession->response_head_recv_flag = 1;
 			content = pSession->response_head;	
@@ -1102,7 +1102,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			pSession->response_head_gen_time++;
 			content = pSession->response_head;
 			contentlen = last_len + contentlen;
-			if ((memmem(content, contentlen, "\r\n\r\n", 4) != NULL)
+			if (((void*)memmem(content, contentlen, "\r\n\r\n", 4) != NULL)
 				|| (3 == pSession->response_head_gen_time))
 			{
 				LOGDEBUG("Session[%d][%d] response head generate successfully. content= %s",
@@ -1179,11 +1179,11 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		strlwr(content);
 		LOGDEBUG("Session[%d][%d] response head generate contentlen= %d, content= %s", nThreadIndex, nIndex, contentlen, content);
 		
-		char* content_encoding = memmem(content, contentlen, "content-encoding: gzip", 22);
+		char* content_encoding = (char*)memmem(content, contentlen, "content-encoding: gzip", 22);
 		if (content_encoding != NULL)
 			pSession->content_encoding_gzip = 1;
 
-		char* content_type = memmem(content, contentlen, "content-type: ", 14);
+		char* content_type = (char*)memmem(content, contentlen, "content-type: ", 14);
 		if ((content_type != NULL) && (HTTP_CONTENT_NONE == pSession->content_type))
 		{
 			if (strncmp(content_type+14, "text/html", 9) == 0 
@@ -1215,11 +1215,11 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 				if (pSession->request_head != NULL)
 				{
 					char *tmp = NULL;
-					char *pszReqRange = memmem(pSession->request_head, pSession->request_head_len, "Range: bytes=0-", 15);
+					char *pszReqRange = (char*)memmem(pSession->request_head, pSession->request_head_len, "Range: bytes=0-", 15);
 					if (pszReqRange != NULL)
 					{
 						int nReqMax = strtol(pszReqRange+15, &tmp, 10);
-						char *pszResRange = memmem(content, contentlen, "content-range: bytes 0-", 23);
+						char *pszResRange = (char*)memmem(content, contentlen, "content-range: bytes 0-", 23);
 						if ((nReqMax > 0) && (pszResRange != NULL))
 						{
 							char *pszResRangeSep = strchr(pszResRange, '/');	
@@ -1243,7 +1243,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			else if ((strncmp(content_type+14, "application/octet-stream", 24) == 0)
 					   || (strncmp(content_type+14, "application/x-download", 22) == 0))
 			{
-				char* pszFileType = memmem(content, contentlen, ".pdf", 4);
+				char* pszFileType = (char*)memmem(content, contentlen, ".pdf", 4);
 				if (pszFileType != NULL)
 					pSession->content_type = HTTP_CONTENT_FILE_PDF;					
 				else
@@ -1255,7 +1255,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			}
 			else if (strncmp(content_type+14, "application/text", 16) == 0)
 			{
-				char* pszFileType = memmem(content, contentlen, ".marc", 4);
+				char* pszFileType = (char*)memmem(content, contentlen, ".marc", 4);
 				if (pszFileType != NULL)
 					pSession->content_type = HTTP_CONTENT_FILE_MARC;					
 				else
@@ -1263,7 +1263,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			}
 			else if (strncmp(content_type+14, "application/x-research-info-systems", 35) == 0)
 			{
-				char* pszFileType = memmem(content, contentlen, ".ris", 4);
+				char* pszFileType = (char*)memmem(content, contentlen, ".ris", 4);
 				if (pszFileType != NULL)
 					pSession->content_type = HTTP_CONTENT_FILE_RIS;					
 				else
@@ -1271,7 +1271,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			}
 			else if (strncmp(content_type+14, "application/bibtex", 18) == 0)
 			{
-				char* pszFileType = memmem(content, contentlen, ".bib", 4);
+				char* pszFileType = (char*)memmem(content, contentlen, ".bib", 4);
 				if (pszFileType != NULL)
 					pSession->content_type = HTTP_CONTENT_FILE_BIB;					
 				else
@@ -1279,7 +1279,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			}
 			else if (strncmp(content_type+14, "application/x-no-such-app", 25) == 0)
 			{
-				char* pszFileType = memmem(content, contentlen, ".txt", 4);
+				char* pszFileType = (char*)memmem(content, contentlen, ".txt", 4);
 				if (pszFileType != NULL)
 					pSession->content_type = HTTP_CONTENT_FILE_TXT;					
 				else
@@ -1287,7 +1287,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			}
 			else if (strncmp(content_type+14, "text/trs", 8) == 0)
 			{
-				char* pszFileType = memmem(content, contentlen, ".txt", 4);
+				char* pszFileType = (char*)memmem(content, contentlen, ".txt", 4);
 				if (pszFileType != NULL)
 					pSession->content_type = HTTP_CONTENT_FILE_TXT;					
 				else
@@ -1308,14 +1308,14 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		}
 		else if (pSession->content_type != HTTP_CONTENT_RES)
 		{
-			char *pszContentLen = memmem(content, contentlen, "content-length:", 15);
-			char *pszTE = memmem(content, contentlen, "transfer-encoding:", 18);
-			char *pszChunked = memmem(content, contentlen, "chunked", 7);
+			char *pszContentLen = (char*)memmem(content, contentlen, "content-length:", 15);
+			char *pszTE = (char*)memmem(content, contentlen, "transfer-encoding:", 18);
+			char *pszChunked = (char*)memmem(content, contentlen, "chunked", 7);
 			if ((pszContentLen == NULL) && ((pszTE == NULL) || (pszChunked == NULL)))
 			{
-				char *pszCode = memmem(content, contentlen, "http/1.1 200", 12);
+				char *pszCode = (char*)memmem(content, contentlen, "http/1.1 200", 12);
 				if (pszCode == NULL)
-					pszCode = memmem(content, contentlen, "http/1.0 200", 12);
+					pszCode = (char*)memmem(content, contentlen, "http/1.0 200", 12);
 				
 				if (pszCode != NULL)
 				{
@@ -1330,7 +1330,7 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			}
 			else
 			{
-				char *pszSB = memmem(pSession->request_head, pSession->request_head_len, "showbook.do", 11);
+				char *pszSB = (char*)memmem(pSession->request_head, pSession->request_head_len, "showbook.do", 11);
 				if (pszSB != NULL)
 				{
 					pSession->content_type = HTTP_CONTENT_HTML;
@@ -1341,13 +1341,13 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		if ((HTTP_CONTENT_HTML == pSession->content_type) || (HTTP_CONTENT_RES == pSession->content_type))
 		{
 			char *tmp = NULL;
-			char *pszContentLen = memmem(content, contentlen, "content-length:", 15);
+			char *pszContentLen = (char*)memmem(content, contentlen, "content-length:", 15);
 			if (pszContentLen != NULL) 
 			{
 				pSession->transfer_flag = HTTP_TRANSFER_HAVE_CONTENT_LENGTH;
 				pSession->res1 = strtol(pszContentLen+15, &tmp, 10);
 				LOGDEBUG("Session[%d][%d] Content-Length = %u, content = %s", nThreadIndex, nIndex, pSession->res1, content);
-				if ((tmp = memmem(content, contentlen, "\r\n\r\n", 4)) != NULL) 
+				if ((tmp = (char*)memmem(content, contentlen, "\r\n\r\n", 4)) != NULL) 
 				{
 					pSession->res2 = contentlen - (tmp-content) - 4;
 					pSession->res_true_len = pSession->res2;
@@ -1355,8 +1355,8 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			}
 			else
 			{
-				char *pszTE = memmem(content, contentlen, "transfer-encoding:", 18);
-				char *pszChunked = memmem(content, contentlen, "chunked", 7);
+				char *pszTE = (char*)memmem(content, contentlen, "transfer-encoding:", 18);
+				char *pszChunked = (char*)memmem(content, contentlen, "chunked", 7);
 				if ((pszTE != NULL) && (pszChunked != NULL))
 				{
 					pSession->transfer_flag = HTTP_TRANSFER_CHUNKED;
@@ -1364,9 +1364,9 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 				}
 				else
 				{
-					char *pszCode = memmem(content, contentlen, "http/1.1 200", 12);
+					char *pszCode = (char*)memmem(content, contentlen, "http/1.1 200", 12);
 					if (pszCode == NULL)
-						pszCode = memmem(content, contentlen, "http/1.0 200", 12);
+						pszCode = (char*)memmem(content, contentlen, "http/1.0 200", 12);
 					
 					if (pszCode != NULL)
 					{
@@ -1461,12 +1461,12 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 	}
 	else if (HTTP_TRANSFER_CHUNKED == pSession->transfer_flag)
 	{
-		char *pszChunkedEnd = memmem(content, contentlen, "\r\n0\r\n\r\n", 7);
+		char *pszChunkedEnd = (char*)memmem(content, contentlen, "\r\n0\r\n\r\n", 7);
 		if (pszChunkedEnd == NULL)
-			pszChunkedEnd = memmem(content, contentlen, "\r\n00000000\r\n\r\n", 14);
+			pszChunkedEnd = (char*)memmem(content, contentlen, "\r\n00000000\r\n\r\n", 14);
 
 		if (pszChunkedEnd == NULL)
-			pszChunkedEnd = memmem(content, contentlen, "\r\n0000\r\n\r\n", 10);
+			pszChunkedEnd = (char*)memmem(content, contentlen, "\r\n0000\r\n\r\n", 10);
 		
 		if (pszChunkedEnd != NULL)
 		{
@@ -1487,15 +1487,15 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 	}
 	else if (HTTP_TRANSFER_WITH_HTML_END == pSession->transfer_flag)
 	{
-		char *pszHtmlEnd = memmem(content, contentlen, "</html>", 7);
+		char *pszHtmlEnd = (char*)memmem(content, contentlen, "</html>", 7);
 		if (pszHtmlEnd != NULL)
 		{
 			LOGDEBUG("Session[%d][%d] find </html>, content=%s", nThreadIndex, nIndex, content);
 			int nLeft = contentlen - (pszHtmlEnd-content+7);
 			if (((pszHtmlEnd-content+7) == contentlen)
-				|| ((nLeft >= 6) && (memmem(pszHtmlEnd+7, 6, "\r\n\r\n", 4) != NULL || memmem(pszHtmlEnd+7, 6, "\n\n", 2) != NULL))
-				|| (memmem(pszHtmlEnd+7, nLeft, "<", 1) == NULL
-					&& memmem(pszHtmlEnd+7, nLeft, ">", 1) == NULL))
+				|| ((nLeft >= 6) && ((void*)memmem(pszHtmlEnd+7, 6, "\r\n\r\n", 4) != NULL || (void*)memmem(pszHtmlEnd+7, 6, "\n\n", 2) != NULL))
+				|| ((void*)memmem(pszHtmlEnd+7, nLeft, "<", 1) == NULL
+					&& (void*)memmem(pszHtmlEnd+7, nLeft, ">", 1) == NULL))
 			{
 				LOGDEBUG("Session[%d][%d]end_reponse with </html>, left length=%d", nThreadIndex, nIndex, nLeft);
 				if (!bIsCurPack)
@@ -1654,7 +1654,6 @@ int AppendLaterPacket(int nThreadIndex, int nIndex, int nIsForceRestore)
 
 int AppendReponse(int nThreadIndex, const char* packet)
 {
-	struct timeval *tv = (struct timeval*)packet;
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	struct tcp_session *pREQ = &_http_session_array[nThreadIndex][0];
@@ -2155,7 +2154,6 @@ int LoadHttpConf(const char* filename)
 	ASSERT(pFileData != NULL);
 	
 	char* httphosts = pFileData;
-
 	nDataLen = GetFileData(HTTP_HOST_PATH_FILE, httphosts, VALUE_LENGTH_MAX);
 	if (nDataLen > 0)
 	{
@@ -2664,7 +2662,7 @@ int GetHttpData(char **data)
 					int nChunkLen = strtol(pTmpContent, &pEnd, 16);
 					if (nChunkLen > 0)
 					{
-						pFind = memmem(pEnd, 2, "\r\n", 2);
+						pFind = (char*)memmem(pEnd, 2, "\r\n", 2);
 						if (pFind != NULL)
 						{
 							pTmpContent = pEnd;
@@ -2676,7 +2674,7 @@ int GetHttpData(char **data)
 							else
 							{
 								pTmpPart = pTmpContent+2;
-								pFind = memmem(pTmpPart, nChunkLen, "\r\n", 2);
+								pFind = (char*)memmem(pTmpPart, nChunkLen, "\r\n", 2);
 								if (pFind != NULL)
 								{
 									nContentLength += pFind-pTmpPart;
@@ -2686,14 +2684,14 @@ int GetHttpData(char **data)
 								{
 									nContentLength += nChunkLen;
 									pTmpContent += 2+nChunkLen;
-									pFind = memmem(pTmpContent, 2, "\r\n", 2);
+									pFind = (char*)memmem(pTmpContent, 2, "\r\n", 2);
 									if (pFind != NULL)
 									{
 										pTmpContent += 2;
 									}
 									else
 									{
-										pFind = memmem(pTmpContent, data_len-(pTmpContent-http_content), "\r\n", 2);
+										pFind = (char*)memmem(pTmpContent, data_len-(pTmpContent-http_content), "\r\n", 2);
 										if (pFind != NULL)
 										{
 											pTmpContent = pFind+2;
@@ -2728,7 +2726,7 @@ int GetHttpData(char **data)
 					}
 					else if (0 == nChunkLen)
 					{
-						pFind = memmem(pEnd, 4, "\r\n\r\n", 4);
+						pFind = (char*)memmem(pEnd, 4, "\r\n\r\n", 4);
 						if (NULL == pFind)
 						{
 							LOGWARN("Session[%d][%d] fail to get end of chunk data. nContentLength=%d", pSession->thread_index, pSession->index, nContentLength);
@@ -2794,7 +2792,7 @@ int GetHttpData(char **data)
 							int nChunkLen = strtol(pTmpContent, &pEnd, 16);
 							if (nChunkLen > 0)
 							{
-								pFind = memmem(pEnd, 2, "\r\n", 2);
+								pFind = (char*)memmem(pEnd, 2, "\r\n", 2);
 								if (pFind != NULL)
 								{
 									pTmpContent = pEnd;
@@ -2807,7 +2805,7 @@ int GetHttpData(char **data)
 									else
 									{
 										pTmpPart = pTmpContent+2;
-										pFind = memmem(pTmpPart, nChunkLen, "\r\n", 2);
+										pFind = (char*)memmem(pTmpPart, nChunkLen, "\r\n", 2);
 										if (pFind != NULL)
 										{
 											int nTmpLen = pFind-pTmpPart;
@@ -2821,14 +2819,14 @@ int GetHttpData(char **data)
 											nOffset += nChunkLen;
 										
 											pTmpContent += 2+nChunkLen;
-											pFind = memmem(pTmpContent, 2, "\r\n", 2);
+											pFind = (char*)memmem(pTmpContent, 2, "\r\n", 2);
 											if (pFind != NULL)
 											{
 												pTmpContent += 2;
 											}
 											else
 											{
-												pFind = memmem(pTmpContent, data_len-(pTmpContent-http_content), "\r\n", 2);
+												pFind = (char*)memmem(pTmpContent, data_len-(pTmpContent-http_content), "\r\n", 2);
 												if (pFind != NULL)
 												{
 													pTmpContent = pFind+2;
@@ -3087,16 +3085,16 @@ void LogDropSessionData(const char *pszDropType, const struct tcp_session *pSess
 	}
 		
 	int nStart = 5;
-	char *pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);
+	char *pszUrlStart = (char*)memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);
 	if (NULL == pszUrlStart)
 	{
-		pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "GET ", 4);
+		pszUrlStart = (char*)memmem(pSession->request_head, pSession->request_head_len, "GET ", 4);
 		nStart = 4;
 	}
 	
-	char *pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.1", 9);
+	char *pszUrlEnd = (char*)memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.1", 9);
 	if (NULL == pszUrlEnd)
-		pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.0", 9);
+		pszUrlEnd = (char*)memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.0", 9);
 
 	if ((pszUrlStart != NULL) && (pszUrlEnd != NULL))
 	{
@@ -3108,7 +3106,7 @@ void LogDropSessionData(const char *pszDropType, const struct tcp_session *pSess
 	{
 		if (strstr(szUrlBody, "http://") == NULL)
 		{
-			char *pszHost = memmem(pSession->request_head, pSession->request_head_len, "Host: ", 6);
+			char *pszHost = (char*)memmem(pSession->request_head, pSession->request_head_len, "Host: ", 6);
 			if (pszHost != NULL)
 			{
 				strcpy(szUrl, "Http://");
@@ -3185,16 +3183,16 @@ void LogDataItems(const struct tcp_session *pSession, int nState, int nDataSize)
 	}
 	
 	int nStart = 5;
-	char *pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);
+	char *pszUrlStart = (char*)memmem(pSession->request_head, pSession->request_head_len, "POST ", 5);
 	if (NULL == pszUrlStart)
 	{
-		pszUrlStart = memmem(pSession->request_head, pSession->request_head_len, "GET ", 4);
+		pszUrlStart = (char*)memmem(pSession->request_head, pSession->request_head_len, "GET ", 4);
 		nStart = 4;
 	}
 	
-	char *pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.1", 9);
+	char *pszUrlEnd = (char*)memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.1", 9);
 	if (NULL == pszUrlEnd)
-		pszUrlEnd = memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.0", 9);
+		pszUrlEnd = (char*)memmem(pSession->request_head, pSession->request_head_len, " HTTP/1.0", 9);
 
 	if ((pszUrlStart != NULL) && (pszUrlEnd != NULL))
 	{
@@ -3206,7 +3204,7 @@ void LogDataItems(const struct tcp_session *pSession, int nState, int nDataSize)
 	{
 		if (strstr(szUrlBody, "http://") == NULL)
 		{
-			char *pszHost = memmem(pSession->request_head, pSession->request_head_len, "Host: ", 6);
+			char *pszHost = (char*)memmem(pSession->request_head, pSession->request_head_len, "Host: ", 6);
 			if (pszHost != NULL)
 			{
 				strcpy(szUrl, "Http://");

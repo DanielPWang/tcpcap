@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-static uint64_t g_nCacheFileSize = DEFAULT_FILE_SIZE;
+static uint64_t g_nCacheFileSize = 2147483648;    //1024*1024*1024*2
 
 void SetCacheFileSize(int nSize)
 {
@@ -141,8 +141,7 @@ int GetLatestCacheFile(CacheFileDef* pCacheFile)
 
 	if (nCount > 0)
     {
-    	char szLatestDate[11] = {0};
-		char* pszLatestFileName = NULL;
+    	char* pszLatestFileName = NULL;
 		for (int i = nCount-1; i >= 0; i--)
 		{
 			pszLatestFileName = strdup(pDent[i]->d_name);

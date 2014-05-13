@@ -50,7 +50,8 @@ int InitBlockProc()
 		{
 			char *left, *right, *mac;
 			char *pszEnd;
-			for(int i = 0, left = szDescMac; i < 6;left = NULL, i++) 
+			int i = 0;
+			for (left = szDescMac; i < 6; left = NULL, i++) 
 			{
 				mac = strtok_r(left, "-", &right);
 				if (NULL == mac) 
@@ -216,7 +217,8 @@ int AddBlockData(const char* pRecvData)
 							pReq->nTimeLong);
 				
 				char *left = NULL, *right = NULL, *ipport = NULL;
-				for (int i = 0, left = pServerIpTmp; ;left = NULL) 
+				int i = 0;
+				for (left = pServerIpTmp; ;left = NULL) 
 				{
 					ipport = strtok_r(left, ",", &right);
 					if (NULL == ipport) 
