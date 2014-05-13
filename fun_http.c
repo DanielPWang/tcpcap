@@ -2453,9 +2453,6 @@ int GetHttpData(char **data)
 	http_content[pos] = '\0';
 	ASSERT(pos+1 == data_len);
 
-	char *a=NULL;
-	*a = 'd';
-	
 	LOGINFO("Session[%d][%d] start to process problem data!", pSession->thread_index, pSession->index);
 	char* HTTP = http_content+35+10+26+26+nPortOffsite+5;
 	char* HTTP_PRE = HTTP;
