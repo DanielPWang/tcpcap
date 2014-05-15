@@ -252,13 +252,22 @@ int RecvData(int sock, struct msg_head *pMsgHead, char **pData)
 		return 0;
 
 	*pData = (char*)calloc(1, pMsgHead->length+1);
-	if (ReadSocketData(sock, *pData, pMsgHead->length) < 0)
+	if (*pData != NULL)
 	{
-		LOGERROR0("Read socket body data failed!");
-		free(*pData);
+		if (ReadSocketData(sock, *pData, pMsgHead->length) < 0)
+		{
+			LOGERROR0("Read socket body data failed!");
+			free(*pData);
+			*pData = NULL;
+			return -1;
+		}
+	}
+	else
+	{
+		LOGERROR("Malloc memory failed! length=%d", pMsgHead->length+1);
 		return -1;
 	}
-		
+	
 	return pMsgHead->length;
 }
 
@@ -314,6 +323,12 @@ int ProcessReqGetIpList()
 	int nIpLen = 0, nMonHostsLen = 0, nExcludeHostsLen = 0;
 	struct hosts_t *pCurHost = NULL;
 	char* pSendData = (char*)calloc(1, VALUE_LENGTH_MAX);
+	if (NULL == pSendData)
+	{
+		LOGERROR("Malloc memory failed! length=%d", VALUE_LENGTH_MAX);
+		return 0;
+	}
+	
 	char* pMonHostsTmp = pSendData;
 	if (_monitor_hosts_count > 0)
 	{
@@ -396,8 +411,11 @@ int ProcessReqGetIpList()
 	}
 
 	if (pSendData != NULL)
+	{
 		free(pSendData);
-
+		pSendData = NULL;
+	}
+	
 	return nSend;
 }
 
@@ -470,7 +488,10 @@ int ProcessReqSetIpList(const char *pRecvData)
 		}
 		
 		if (pMonHostsTmp != NULL)
+		{
 			free(pMonHostsTmp);
+			pMonHostsTmp = NULL;
+		}
 	}
 
 	nExcludeHostsLen = *(int*)(pRecvData+4+nMonHostsLen);
@@ -499,7 +520,10 @@ int ProcessReqSetIpList(const char *pRecvData)
 				++n;
 		}
 		if (pExcludeHostsTmp != NULL)
+		{
 			free(pExcludeHostsTmp);
+			pExcludeHostsTmp = NULL;
+		}
 	}
 
 	for (int i = (_active_sock-1); i >= 0; i--)
@@ -689,7 +713,10 @@ int ProcessClientCfgSockReq()
 		}
 
 		if (pRecvData != NULL)
+		{
 			free(pRecvData);
+			pRecvData = NULL;
+		}
 	}
 
 	return nRs;
@@ -730,7 +757,10 @@ int ProcessClientSockReq()
 		}
 		
 		if (pRecvData != NULL)
+		{
 			free(pRecvData);
+			pRecvData = NULL;
+		}
 	}
 
 	return nRs;
@@ -834,6 +864,7 @@ int ProcessClientSockRes()
 		gettimeofday(&tvAfterSend, NULL);
 		g_nSendDataCostTime += ((uint64_t)tvAfterSend.tv_sec*1000000 + tvAfterSend.tv_usec) - ((uint64_t)tvBeforSend.tv_sec*1000000 + tvBeforSend.tv_usec);
 		free(data);
+		data = NULL;
 		g_nFlagSendData = 1;
 
 		if (bIsFromCacheFile)
@@ -880,7 +911,8 @@ int ProcessClientSockRes()
 					{
 						LOGDEBUG("Send flow data of _flow_session[%d]", i);
 						nSend = SendData(_client_socket, MSG_TYPE_RES_FLOW_DATA, data, datalen);
-						free((void*)data);
+						free(data);
+						data = NULL;
 						if (nSend < 0) 
 						{
 							LOGWARN0("remote client socket is error or close. recontinue.");
@@ -1095,7 +1127,8 @@ int LocalCacheFile()
 			nWriteRs = WriteNextCacheRecord(&g_fileWriter, pData, nDataLen);
 			gettimeofday(&tvAfterWrite, NULL);
 			g_nCacheDataCostTime += ((uint64_t)tvAfterWrite.tv_sec*1000000 + tvAfterWrite.tv_usec) - ((uint64_t)tvBeforWrite.tv_sec*1000000 + tvBeforWrite.tv_usec);
-			free((void*)pData);
+			free(pData);
+			pData = NULL;
 			if (nWriteRs < 0) 
 			{
 				LOGERROR("Fail to write data to cache file, return code= %d \n \

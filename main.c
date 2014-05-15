@@ -211,16 +211,21 @@ int main(int argc, char* argv[])
 {
 	// process params
 	ShowVersion();
-	if (argc>1) {
-		if (strcmp(argv[1],"-v")==0){
-		ShowUsage(0);
-		} else {
-		ShowUsage(-1);
+	if (argc>1) 
+	{
+		if (strcmp(argv[1],"-v")==0)
+		{
+			ShowUsage(0);
+		} 
+		else 
+		{
+			ShowUsage(-1);
 		}
 	}
 
 	// check root
-	if (getuid() != 0) {
+	if (getuid() != 0) 
+	{
 		fprintf(stderr, "You must be root\n");
 		return -1;
 	}

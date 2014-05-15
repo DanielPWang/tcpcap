@@ -110,8 +110,11 @@ void CleanBlockData(BlockItemDef* pBlockItem)
 		return;
 
 	if (pBlockItem->phServer != NULL)
+	{
 		free(pBlockItem->phServer);
-
+		pBlockItem->phServer = NULL;
+	}
+	
 	memset(pBlockItem, 0, sizeof(BlockItemDef));
 	g_nBlockItemCount--;
 }
@@ -187,58 +190,69 @@ int AddBlockData(const char* pRecvData)
 		if (pBlockItemIdle != NULL)
 		{
 			char* pServerIpTmp = (char*)calloc(1, pReq->nServerIpLen+1);
-			strncpy(pServerIpTmp, pRecvData+sizeof(BlockReqDef), pReq->nServerIpLen);
+			if (pServerIpTmp != NULL)
+			{
+				strncpy(pServerIpTmp, pRecvData+sizeof(BlockReqDef), pReq->nServerIpLen);
 
-			if (2 == pReq->nBlockMode)
-			{
-				str_ipp(pReq->szClientIp, &pBlockItemIdle->hClient);
-			}
-			
-			if ((1 == pReq->nBlockMode) || (2 == pReq->nBlockMode))
-			{
-				pBlockItemIdle->nBlockMode = pReq->nBlockMode;
-				pBlockItemIdle->nServerID = pReq->nServerID;
-				pBlockItemIdle->nServerIpCount = count_char(pServerIpTmp, ',') + 1;
-				pBlockItemIdle->phServer = (struct hosts_t *)calloc(sizeof(struct hosts_t), pBlockItemIdle->nServerIpCount);
-				memset(pBlockItemIdle->szBlockInfo, 0, sizeof(pBlockItemIdle->szBlockInfo));
-				strcpy(pBlockItemIdle->szBlockInfo, pReq->szBlockInfo);
-					
-				LOGINFO("Add Block Item; Block Mode=%d, \n \
-							Client IP=%s, \n \
-							Server ID=%d, \n \
-							Server Count=%d, \n \
-							Server IP=%s, \n \
-							Time Long=%d", 
-							pReq->nBlockMode,
-							pReq->szClientIp,
-							pReq->nServerID,
-							pBlockItemIdle->nServerIpCount,
-							pServerIpTmp,
-							pReq->nTimeLong);
-				
-				char *left = NULL, *right = NULL, *ipport = NULL;
-				int i = 0;
-				for (left = pServerIpTmp; ;left = NULL) 
+				if (2 == pReq->nBlockMode)
 				{
-					ipport = strtok_r(left, ",", &right);
-					if (NULL == ipport) 
-						break;
-
-					if (str_ipp(ipport, &pBlockItemIdle->phServer[i])) 
-						++i;
+					str_ipp(pReq->szClientIp, &pBlockItemIdle->hClient);
 				}
 				
-				pBlockItemIdle->nEndTime = time(NULL) + pReq->nTimeLong;
-				g_nBlockItemCount++;
+				if ((1 == pReq->nBlockMode) || (2 == pReq->nBlockMode))
+				{
+					pBlockItemIdle->nBlockMode = pReq->nBlockMode;
+					pBlockItemIdle->nServerID = pReq->nServerID;
+					pBlockItemIdle->nServerIpCount = count_char(pServerIpTmp, ',') + 1;
+					pBlockItemIdle->phServer = (struct hosts_t *)calloc(sizeof(struct hosts_t), pBlockItemIdle->nServerIpCount);
+					memset(pBlockItemIdle->szBlockInfo, 0, sizeof(pBlockItemIdle->szBlockInfo));
+					strcpy(pBlockItemIdle->szBlockInfo, pReq->szBlockInfo);
+						
+					LOGINFO("Add Block Item; Block Mode=%d, \n \
+								Client IP=%s, \n \
+								Server ID=%d, \n \
+								Server Count=%d, \n \
+								Server IP=%s, \n \
+								Time Long=%d", 
+								pReq->nBlockMode,
+								pReq->szClientIp,
+								pReq->nServerID,
+								pBlockItemIdle->nServerIpCount,
+								pServerIpTmp,
+								pReq->nTimeLong);
+					
+					char *left = NULL, *right = NULL, *ipport = NULL;
+					int i = 0;
+					for (left = pServerIpTmp; ;left = NULL) 
+					{
+						ipport = strtok_r(left, ",", &right);
+						if (NULL == ipport) 
+							break;
+
+						if (str_ipp(ipport, &pBlockItemIdle->phServer[i])) 
+							++i;
+					}
+					
+					pBlockItemIdle->nEndTime = time(NULL) + pReq->nTimeLong;
+					g_nBlockItemCount++;
+				}
+				else
+				{
+					LOGERROR("Request block mode is wrong, block mode = %d", pReq->nBlockMode);
+					nRs = -1;
+				}
+				
+				if (pServerIpTmp != NULL)
+				{
+					free(pServerIpTmp);
+					pServerIpTmp = NULL;
+				}
 			}
 			else
 			{
-				LOGERROR("Request block mode is wrong, block mode = %d", pReq->nBlockMode);
+				LOGERROR("Malloc memory failed! length=%d", pReq->nServerIpLen+1);
 				nRs = -1;
 			}
-			
-			if (pServerIpTmp != NULL)
-				free(pServerIpTmp);
 		}
 		else
 		{

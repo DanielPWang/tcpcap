@@ -31,6 +31,7 @@ int str_ipp(const char* ipport, struct hosts_t* hosts)
 	}
 	
 	free(tmp);
+	tmp = NULL;
 
 	if (nRet==0) memset(hosts, 0, sizeof(*hosts));
 	return nRet;

@@ -127,6 +127,7 @@ int OpenMonitorDevs()
 		}
 	}
 	free(value);
+	value = NULL;
 	return _active_sock;
 }
 

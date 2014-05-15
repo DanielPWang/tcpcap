@@ -68,6 +68,7 @@ static int g_bIsSendTimeoutData = 0;
 static int g_bIsSendChannelReusedData = 0;
 static int g_bIsSendDisorderRebuildFailedData = 0;
 static int g_bIsSendUnknownData = 0;
+static int g_bIsCap206data = 0;
 
 static int g_bIsLogResData = 0;
 static int g_bIsLogTimeoutData = 0;
@@ -447,6 +448,7 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 			void* tmp = packet;
 			packet = *(void**)packet;
 			free(tmp);
+			tmp = NULL;
 		}
 
 		LOGDEBUG("Session[%d][%d] clean packet data successfully!", pSession->thread_index, pSession->index);
@@ -457,6 +459,7 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 			void* tmp = packet;
 			packet = *(void**)packet;
 			free(tmp);
+			tmp = NULL;
 		}
 
 		LOGDEBUG("Session[%d][%d] clean packet_later data successfully!", pSession->thread_index, pSession->index);
@@ -595,15 +598,17 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 	{
 		return -1;
 	}
-	
+
+	/*
 	char tmp = *enter;
 	*enter = '\0';
 	const char* cmdline = content;
 	LOGTRACE0(cmdline);
 	*enter = tmp;
-
+	*/
+	
 	unsigned init_content_type = HTTP_CONTENT_NONE;
-	char pTmpContent[RECV_BUFFER_LEN] = {0};
+	char pTmpContent[RECV_BUFFER_LEN+1] = {0};
 	memcpy(pTmpContent, content, contentlen);
 	pTmpContent[contentlen] = '\0';
 	strlwr(pTmpContent);
@@ -790,6 +795,14 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 		return -2;
 	}
 
+	pIDL->request_head = (char*)calloc(1, contentlen+1);
+	if (NULL == pIDL->request_head)
+	{
+		LOGERROR("Malloc memory failed! length=%d", contentlen+1);
+		pthread_mutex_unlock(&_session_proc_lock[nThreadIndex]);
+		return -4;
+	}
+	
 	pIDL->flag = HTTP_SESSION_REQUESTING;
 	pIDL->client.ip.s_addr = iphead->saddr;
 	pIDL->server.ip.s_addr = iphead->daddr;
@@ -826,7 +839,6 @@ int NewHttpSession(int nThreadIndex, const char* packet)
 		pIDL->flag = HTTP_SESSION_REQUEST;
 	}
 
-	pIDL->request_head = (char*)calloc(1, contentlen+1);
 	memcpy(pIDL->request_head, content, contentlen);
 	pIDL->request_head_len = contentlen+1;
 		
@@ -868,7 +880,22 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		{
 			LOGDEBUG("S->C packet for first response. Session[%d][%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
 					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);
+
+			char *pszCode = NULL;
+			if (bIsCurPack && !g_bIsCap206data)
+			{
+				pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 206", 12);
+				if (pszCode == NULL)
+					pszCode = (char*)memmem(content, contentlen, "HTTP/1.0 206", 12);
+
+				if (pszCode != NULL)
+				{
+					CleanHttpSession(pSession);
+					return HTTP_APPEND_DROP_PACKET;
+				}
+			}
+				
+			pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);
 			if (pszCode == NULL)
 				pszCode = (char*)memmem(content, contentlen, "HTTP/1.0 100", 12);
 
@@ -1051,6 +1078,13 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 			&& (HTTP_TRANSFER_INIT == pSession->transfer_flag) 
 			&& (NULL == pSession->response_head))
 	{
+		pSession->response_head = (char*)calloc(1, contentlen+1);
+		if (NULL == pSession->response_head)
+		{
+			LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, contentlen+1);
+			return HTTP_APPEND_DROP_PACKET;
+		}
+		
 		pSession->flag = HTTP_SESSION_RESPONSEING;
 		pSession->seq = tcphead->ack_seq;
 		pSession->ack = tcphead->seq;
@@ -1062,7 +1096,6 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 		*(const char**)pSession->lastdata = pPacket;
 		pSession->lastdata = (void*)pPacket;
 		
-		pSession->response_head = (char*)calloc(1, contentlen+1);
 		memcpy(pSession->response_head, content, contentlen);
 		pSession->response_head_len = contentlen+1;
 		pSession->response_head_gen_time++;
@@ -1096,6 +1129,13 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 				nThreadIndex, nIndex, contentlen, content);
 			int last_len = pSession->response_head_len;
 			pSession->response_head = realloc(pSession->response_head, last_len + contentlen);
+
+			if (NULL == pSession->response_head)
+			{
+				LOGERROR("Session[%d][%d] realloc memory failed! length=%d", pSession->thread_index, pSession->index, last_len + contentlen);
+				return HTTP_APPEND_DROP_PACKET;
+			}
+			
 			memcpy(pSession->response_head+last_len-1, content, contentlen);
 			pSession->response_head[last_len+contentlen-1] = '\0';
 			pSession->response_head_len = last_len + contentlen;
@@ -1150,6 +1190,11 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 	{
 		int nPartContentLen = pSession->cur_content_len + contentlen;
 		pSession->part_content = (char*)calloc(1, nPartContentLen+1);
+		if (NULL == pSession->part_content)
+		{
+			LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, nPartContentLen+1);
+			return HTTP_APPEND_DROP_PACKET;
+		}
 		pSession->part_content_len = nPartContentLen;
 		memcpy(pSession->part_content, pSession->cur_content, pSession->cur_content_len);
 		memcpy(pSession->part_content+pSession->cur_content_len, content, contentlen);
@@ -1160,6 +1205,11 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 	else
 	{
 		pSession->part_content = (char*)calloc(1, contentlen+1);
+		if (NULL == pSession->part_content)
+		{
+			LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, contentlen+1);
+			return HTTP_APPEND_DROP_PACKET;
+		}
 		pSession->part_content_len = contentlen;
 		memcpy(pSession->part_content, content, contentlen);
 	}
@@ -1167,6 +1217,11 @@ int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int 
 	if (contentlen > 0)
 	{
 		pSession->cur_content = (char*)calloc(1, contentlen+1);
+		if (NULL == pSession->cur_content)
+		{
+			LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, contentlen+1);
+			return HTTP_APPEND_DROP_PACKET;
+		}
 		pSession->cur_content_len = contentlen;
 		memcpy(pSession->cur_content, content, contentlen);
 	}
@@ -1569,6 +1624,11 @@ int AppendClientToServer(int nThreadIndex, int nIndex, const char* pPacket)
 
 	int last_len = pSession->request_head_len;
 	pSession->request_head = realloc(pSession->request_head, last_len + contentlen);
+	if (NULL == pSession->request_head)
+	{
+		LOGERROR("Session[%d][%d] realloc memory failed! length=%d", pSession->thread_index, pSession->index, last_len + contentlen);
+		return HTTP_APPEND_DROP_PACKET;
+	}
 	memcpy(pSession->request_head+last_len-1, content, contentlen);
 	pSession->request_head[last_len+contentlen-1] = '\0';
 	pSession->request_head_len = last_len + contentlen;
@@ -1620,18 +1680,23 @@ int AppendLaterPacket(int nThreadIndex, int nIndex, int nIsForceRestore)
 				switch (nRs)
 				{
 				case HTTP_APPEND_DROP_PACKET:
-					free(pCurTmp);
+					{
+						free(pCurTmp);
+						pCurTmp = NULL;
+					}
 					break;
 				case HTTP_APPEND_FINISH_LATER:
-					pSession->finish_type = HTTP_SESSION_FINISH_SUCCESS;
-					pSession->flag = HTTP_SESSION_FINISH;
-					if (push_queue(_whole_content, pSession) < 0)
 					{
-						++g_nCountWholeContentFull[nThreadIndex];
-						LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
-					}
+						pSession->finish_type = HTTP_SESSION_FINISH_SUCCESS;
+						pSession->flag = HTTP_SESSION_FINISH;
+						if (push_queue(_whole_content, pSession) < 0)
+						{
+							++g_nCountWholeContentFull[nThreadIndex];
+							LOGWARN("Thread[%d]'s whole content queue is full. count = %d", nThreadIndex, g_nCountWholeContentFull[nThreadIndex]);
+						}
 
-					nIsFinish = 1;
+						nIsFinish = 1;
+					}
 					break;
 				default:
 					break;
@@ -1737,7 +1802,8 @@ void *HTTP_Thread(void* param)
 		}
 		
 		const char* packet = pop_queue(_packets_array[nThreadIndex]);
-		if (packet == NULL) {
+		if (packet == NULL) 
+		{
 			usleep(50000);
 			continue;
 		}
@@ -1749,6 +1815,7 @@ void *HTTP_Thread(void* param)
 
 		if (tcphead->syn || contentlen <=0) { 
 			free((void*)packet); 
+			packet = NULL;
 			continue; 
 		} 
 
@@ -1806,6 +1873,7 @@ void *HTTP_Thread(void* param)
 					}
 				}
 				free((void*)packet);
+				packet = NULL;
 			}
 
 			struct timeval tvAfterProc;
@@ -1825,6 +1893,7 @@ void *HTTP_Thread(void* param)
 		{
 			LOGDEBUG0("cannt find request with reponse.");
 			free((void*)packet);
+			packet = NULL;
 		}
 
 		struct timeval tvAfterProc;
@@ -1884,6 +1953,11 @@ int HttpInit()
 	GetValue(CONFIG_PATH, "send_disorder_rebuild_failed_data", szSendDisorderRebuildFailedData, 6);
 	if (strcmp(szSendDisorderRebuildFailedData, "true") == 0)
 		g_bIsSendDisorderRebuildFailedData = 1;
+
+	char szCap206data[10] = {0};
+	GetValue(CONFIG_PATH, "cap206data", szCap206data, 6);
+	if (strcmp(szCap206data, "true") == 0)
+		g_bIsCap206data = 1;
 
 	char szLogResData[10] = {0};
 	GetValue(CONFIG_PATH, "log_image_data", szLogResData, 6);
@@ -2211,6 +2285,7 @@ int LoadHttpConf(const char* filename)
 	}
 
 	free(pFileData);
+	pFileData = NULL;
 		
 	return 0;
 }
@@ -2236,12 +2311,22 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 		}
 		
 		pPlain = calloc(1, plain_len+1024);
+		if (NULL == pPlain)
+		{
+			LOGERROR("TransGzipData malloc memory failed! length=%d", plain_len+1024);
+			return -1;
+		}
 	}
 	else if (0 == plain_len)
 	{
 		if (nDataLen > 0 && nDataLen < 800000)
 		{
 			pPlain = calloc(1, 5120);
+			if (NULL == pPlain)
+			{
+				LOGERROR("TransGzipData malloc memory failed! length=%d", 5120);
+				return -1;
+			}
 			plain_len = -1;
 		}
 		else
@@ -2318,6 +2403,13 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 			}
 			nReaded += n;
 			pPlain = realloc(pPlain, nReaded + 5120);
+			if (NULL == pPlain)
+			{
+				LOGERROR("TransGzipData realloc memory failed! length=%d", nReaded + 5120);
+				gzclose(p);
+				unlink(gzfile);
+				return -1;
+			}
 
 			if (++nRepeatRead >= 150)
 			{
@@ -2391,9 +2483,10 @@ int GetHttpData(char **data)
 	
 	unsigned data_len = http_len+35+10+26+26+nPortOffsite+5+1;
 	char* http_content = (char*)calloc(1, data_len);
-	if (http_content == NULL) 
+	if (NULL == http_content) 
 	{
-		LOGERROR0("mallocing memory failed. will be retry");
+		LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, data_len);
+		CleanHttpSession(pSession);
 		return 0;
 	}
 	// make data
@@ -2435,6 +2528,7 @@ int GetHttpData(char **data)
 			pSession->data = packet;
 			CleanHttpSession(pSession);
 			free(http_content);
+			http_content = NULL;
 			return 0;
 		}
 		const char *content = (void*)tcphead + tcphead->doff*4;
@@ -2443,6 +2537,7 @@ int GetHttpData(char **data)
 		void* tmp = packet;
 		packet = *(void**)packet;
 		free(tmp);
+		tmp = NULL;
 	} while (packet!=NULL);
 	pSession->data = NULL;
 
@@ -2511,6 +2606,7 @@ int GetHttpData(char **data)
 
 		CleanHttpSession(pSession);
 		free(http_content);
+		http_content = NULL;
 		return 0;
 	}
 			
@@ -2598,6 +2694,7 @@ int GetHttpData(char **data)
 		{
 			CleanHttpSession(pSession);
 			free(http_content);
+			http_content = NULL;
 			return 0;
 		}
 	}
@@ -2623,6 +2720,7 @@ int GetHttpData(char **data)
 			LOGWARN("Session[%d][%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s, g_nContentErrorCount = %d, g_nHttpcodeErrorCount = %d", pSession->thread_index, pSession->index, HTTP_PRE, g_nContentErrorCount, g_nHttpcodeErrorCount);
 			CleanHttpSession(pSession);
 			free(http_content);
+			http_content = NULL;
 			return 0;
 		}
 
@@ -2633,6 +2731,7 @@ int GetHttpData(char **data)
 			LOGDEBUG("Session[%d][%d] httpcode=%d, Do not send current content.", pSession->thread_index, pSession->index, nHttpcode);
 			CleanHttpSession(pSession);
 			free(http_content);
+			http_content = NULL;
 			return 0;
 		}
 
@@ -2845,7 +2944,7 @@ int GetHttpData(char **data)
 					}
 					else
 					{
-						LOGERROR("cannt calloc() chunk content buffer, %s", strerror(errno));
+						LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, data_len);
 						//goto NOZIP
 						nIsImmSendData = 1;
 					}
@@ -2942,7 +3041,7 @@ int GetHttpData(char **data)
 				}
 				else
 				{
-					LOGERROR("cannt calloc() file content buffer, %s", strerror(errno));
+					LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, data_len);
 					//goto NOZIP;
 					nIsImmSendData = 1;
 				}
@@ -3007,7 +3106,7 @@ int GetHttpData(char **data)
 								}
 								else
 								{
-									LOGERROR("cannt calloc() new_data, %s", strerror(errno));
+									LOGERROR("Session[%d][%d] malloc memory failed! length=%d", pSession->thread_index, pSession->index, new_data_len);
 									//goto NOZIP;
 								}
 							}
@@ -3061,6 +3160,7 @@ int GetHttpData(char **data)
 	
 	CleanHttpSession(pSession);
 	free(http_content);
+	http_content = NULL;
 	return 0;
 }
 

@@ -49,13 +49,16 @@ int IsCacheFullDays(int nFullDays)
 			}
 			
 			free(pszLatestFileName);
+			pszLatestFileName = NULL;
 		}
 		
 		while (nCount--)
 		{
 			free(pDent[nCount]);
+			pDent[nCount] = NULL;
 		}
 		free(pDent);
+		pDent = NULL;
     }
 
 	int nIsFull = 0;
@@ -183,18 +186,22 @@ int GetLatestCacheFile(CacheFileDef* pCacheFile)
 				if (0 == nRs)
 				{
 					free(pszLatestFileName);
+					pszLatestFileName = NULL;
 					break;
 				}
 			}
 			
 			free(pszLatestFileName);
+			pszLatestFileName = NULL;
 		}
 		
 		while (nCount--)
 		{
 			free(pDent[nCount]);
+			pDent[nCount] = NULL;
 		}
 		free(pDent);
+		pDent = NULL;
     }
 	
 	return nRs;
@@ -237,17 +244,21 @@ int GetNewCacheFileName(char* pszFileName)
 				}
 
 				free(pszLatestFileName);
+				pszLatestFileName = NULL;
 				break;
 			}
 			
 			free(pszLatestFileName);
+			pszLatestFileName = NULL;
 		}
 		
 		while (nCount--)
 		{
 			free(pDent[nCount]);
+			pDent[nCount] = NULL;
 		}
 		free(pDent);
+		pDent = NULL;
     }
 
 	if (nNum > 999)
