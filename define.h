@@ -8,7 +8,7 @@
 #define MONITOR_COUNT 5
 
 // configure
-#define CONFIG_PATH_FILE "/config/agent.conf"
+#define CONFIG_PATH_FILE "./config/agent.conf"
 #define HTTP_HOST_PATH_FILE "./config/http_host_ip.lst"
 #define EXCLUDE_HOST_PATH_FILE "./config/exclude_host_ip.lst"
 #define VALUE_LENGTH_MAX  (1024*6)

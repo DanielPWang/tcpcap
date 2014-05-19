@@ -7,6 +7,13 @@
 
 #define CONF_NAME_LEN 128
 
+int GetValue_i(const char* confname, const char* name)
+{
+	char value[32];
+	if (GetValue(confname, name, value, sizeof(value)) == NULL) return 0;
+	return atoi(value);
+}
+
 char* GetValue(const char* confname, const char* name, char* value, size_t len)
 {
 	assert(value!=NULL && len!=0);

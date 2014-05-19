@@ -69,51 +69,45 @@ void ShowUsage(int nExit)
 	exit(nExit);
 }
 
-int main(int argc, char* argv[])
+void ProcessCMD(int argc, char* argv[])
 {
-	// process params
-	ShowVersion();
 	if (argc>1) {
 		if (strcmp(argv[1],"-v")==0){
-		ShowUsage(0);
+			ShowUsage(0);
 		} else {
-		ShowUsage(-1);
+			ShowUsage(-1);
 		}
+		exit(2);
 	}
+}
 
-	// check root
+void CheckRoot()
+{
 	if (getuid() != 0) {
 		fprintf(stderr, "You must be root\n");
-		return -1;
+		exit(3);
 	}
+}
 
-	// signal somethings
+void ProcessSIG()
+{
 	signal(SIGSEGV, sig_segv);
 	signal(SIGCHLD, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGINT,  sig_int);
 	signal(SIGHUP,  SIG_IGN);
 	signal(SIGUSR1, sig_usr);
+}
 
-	// config_file
-	char* conf_file = calloc(1,256);
-	strcpy(conf_file, argv[0]);
-	strcat(dirname(conf_file), CONFIG_PATH_FILE);
-	CONFIG_PATH = conf_file;
+int main(int argc, char* argv[])
+{
+	ShowVersion();
+	ProcessCMD(argc, argv);
+	CheckRoot();
+	ProcessSIG();
+	CONFIG_PATH = CONFIG_PATH_FILE;
 
-	// log
-	{
-		char* tmp = calloc(1,1024);
-		ASSERT(tmp!=NULL);
-		char* logfile=tmp;
-		char* loglevel=tmp+1000;
-
-		GetValue(CONFIG_PATH, "logfile", logfile, 1000);
-		GetValue(CONFIG_PATH, "loglevel", loglevel, 24);
-		int nlevel = atoi(loglevel);
-		open_log(logfile, nlevel);
-		free(tmp);
-	}
+	open_log("eru.log", GetValue_i(CONFIG_PATH, "loglevel"));
 	// open monitordev
 	if (OpenMonitorDevs() == 0) {
 		LOGFATAL("%s", "Can Open any monitor.");

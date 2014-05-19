@@ -130,8 +130,7 @@ int CapturePacket(char* buffer, size_t size)
 	struct sockaddr_in sa;
 	size_t salen = sizeof(sa);
 
-	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0,
-			(struct sockaddr*)&sa, &salen);
+	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
 
 	if (nRecv == -1) { return 0; }
 

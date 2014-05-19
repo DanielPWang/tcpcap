@@ -7,6 +7,7 @@
  * @note  
  */
 char* GetValue(const char* confname, const char* name, char* value, size_t len);
+int GetValue_i(const char* confname, const char* name);
 int GetFileData(const char* pszFileName, char* pszFileData, int nMaxLen);
 
 #endif
