@@ -47,11 +47,12 @@ static int g_nReusedCount = 0;
 static int g_nChunked = 0;
 static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
+// TODO: why?
 static uint64_t g_nHttpLen = 0;
-
 static int g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 static int g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
 static int g_nHttpTimeout = HTTP_TIMEOUT;
+// end.
 
 static int g_nSendErrStateDataFlag = 1;
 
@@ -223,7 +224,7 @@ int NewHttpSession(const char* packet)
 	// find IDL session
 	struct tcp_session* pIDL = NULL;
 	int index = 0;
-	for (; index < g_nMaxHttpSessionCount; ++index) 
+	for (; index < g_nMaxHttpSessionCount; ++index)		// todo: MAX_HTTP_SESSION
 	{
 		if (_http_session[index].flag != HTTP_SESSION_IDL && 
 			_http_session[index].flag != HTTP_SESSION_FINISH) 
@@ -236,7 +237,7 @@ int NewHttpSession(const char* packet)
 				CleanHttpSession(pREQ);
 				break;
 			} 
-			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout) 
+			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout)	// TODO: HTTP_TIME_OUT
 			{
 				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
 				CleanHttpSession(pREQ);
@@ -303,7 +304,6 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
-	// int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	const char *content = (void*)tcphead + tcphead->doff*4;
 	struct tcp_session *pSession = &_http_session[nIndex];
@@ -315,7 +315,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		{
 			LOGDEBUG("S->C packet for first response. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
 					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);
+			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);	// TODO: setupid. why?
 			if (pszCode == NULL)
 				pszCode = memmem(content, contentlen, "HTTP/1.0 100", 12);
 
@@ -841,14 +841,14 @@ int AppendReponse(const char* packet, int bIsCurPack)
 	struct tcp_session *pREQ = &_http_session[0];
 
 	int index = 0;
-	for (; index < g_nMaxHttpSessionCount; ++index) 
+	for (; index < g_nMaxHttpSessionCount; ++index) // TODO: MAX_HTTP_SESSION
 	{
 		pREQ = &_http_session[index];
 		if (pREQ->flag == HTTP_SESSION_IDL || pREQ->flag == HTTP_SESSION_FINISH) 
 			continue;
 
 		// process timeout
-		if (tv->tv_sec-pREQ->update > g_nHttpTimeout) 
+		if (tv->tv_sec-pREQ->update > g_nHttpTimeout) // TODO: HTTP_TIMEOUT
 		{
 			LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
 			CleanHttpSession(pREQ);
