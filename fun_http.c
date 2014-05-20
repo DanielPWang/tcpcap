@@ -45,6 +45,11 @@ static int g_nReusedCount = 0;
 static int g_nChunked = 0;
 static int g_nNone = 0;
 static int g_nHtmlEnd = 0;
+static uint64_t g_nHttpLen = 0;
+
+static int g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
+static int g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
+static int g_nHttpTimeout = HTTP_TIMEOUT;
 
 static int g_nSendErrStateDataFlag = 1;
 
@@ -216,7 +221,7 @@ int NewHttpSession(const char* packet)
 	// find IDL session
 	struct tcp_session* pIDL = NULL;
 	int index = 0;
-	for (; index < MAX_HTTP_SESSIONS; ++index) 
+	for (; index < g_nMaxHttpSessionCount; ++index) 
 	{
 		if (_http_session[index].flag != HTTP_SESSION_IDL && 
 			_http_session[index].flag != HTTP_SESSION_FINISH) 
@@ -229,7 +234,7 @@ int NewHttpSession(const char* packet)
 				CleanHttpSession(pREQ);
 				break;
 			} 
-			else if (tv->tv_sec - pREQ->update > HTTP_TIMEOUT) 
+			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout) 
 			{
 				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
 				CleanHttpSession(pREQ);
@@ -833,14 +838,14 @@ int AppendReponse(const char* packet, int bIsCurPack)
 	struct tcp_session *pREQ = &_http_session[0];
 
 	int index = 0;
-	for (; index < MAX_HTTP_SESSIONS; ++index) 
+	for (; index < g_nMaxHttpSessionCount; ++index) 
 	{
 		pREQ = &_http_session[index];
 		if (pREQ->flag == HTTP_SESSION_IDL || pREQ->flag == HTTP_SESSION_FINISH) 
 			continue;
 
 		// process timeout
-		if (tv->tv_sec-pREQ->update > HTTP_TIMEOUT) 
+		if (tv->tv_sec-pREQ->update > g_nHttpTimeout) 
 		{
 			LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
 			CleanHttpSession(pREQ);
@@ -880,7 +885,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 					inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest));
 		}
 	}
-	if (index == MAX_HTTP_SESSIONS) 
+	if (index == g_nMaxHttpSessionCount) 
 	{
 		char sip[20], dip[20], stip[20], dtip[20];
 		LOGTRACE("Session[%d]  append %s:%d => %s:%d", index,
@@ -972,18 +977,41 @@ int HttpInit()
 	if (GetValue(CONFIG_PATH, "SendErrStateDataFlag", szSendErrStateDataFlag, 2) != NULL)
 		g_nSendErrStateDataFlag = atoi(szSendErrStateDataFlag);
 	
-	_packets = init_queue(MAX_HTTP_PACKETS);
+	char szMaxSessionCount[10] = {0};
+	char szMaxPacketCount[10] = {0};
+	char szHttpTimeout[10] = {0};
+	GetValue(CONFIG_PATH, "max_session_count", szMaxSessionCount, 6);
+	GetValue(CONFIG_PATH, "max_packet_count", szMaxPacketCount, 6);
+	GetValue(CONFIG_PATH, "http_timeout", szHttpTimeout, 3);
+	
+	g_nMaxHttpSessionCount = atoi(szMaxSessionCount);
+	if (g_nMaxHttpSessionCount < 500 || g_nMaxHttpSessionCount > 100000)
+		g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
+	
+	g_nMaxHttpPacketCount = atoi(szMaxPacketCount);
+	if (g_nMaxHttpPacketCount < 1000 || g_nMaxHttpPacketCount > 200000)
+		g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
+	
+	g_nHttpTimeout = atoi(szHttpTimeout);
+	if (g_nHttpTimeout < 10 || g_nHttpTimeout > 600)
+		g_nHttpTimeout = HTTP_TIMEOUT;
+
+	printf("max_http_session_count = %d\n", g_nMaxHttpSessionCount);
+	printf("max_http_packet_count = %d\n", g_nMaxHttpPacketCount);
+	printf("max_http_timeout = %d\n", g_nHttpTimeout);
+		
+	_packets = init_queue(g_nMaxHttpPacketCount);
 	ASSERT(_packets != NULL);
-	_http_session = calloc(sizeof(_http_session[0]), MAX_HTTP_SESSIONS);
+	_http_session = calloc(sizeof(_http_session[0]), g_nMaxHttpSessionCount);
 	ASSERT(_http_session != NULL);
-	_whole_content = init_queue(MAX_HTTP_SESSIONS);
+	_whole_content = init_queue(g_nMaxHttpSessionCount);
 	ASSERT(_whole_content != NULL);
-	_idl_session = init_queue(MAX_HTTP_SESSIONS);
+	_idl_session = init_queue(g_nMaxHttpSessionCount);
 	ASSERT(_idl_session != NULL);
-	//_use_session = init_queue(MAX_HTTP_SESSIONS);
+	//_use_session = init_queue(g_nMaxHttpSessionCount);
 	//ASSERT(_use_session != NULL);
 
-	for (size_t index = 0; index < MAX_HTTP_SESSIONS; ++index)
+	for (size_t index = 0; index < g_nMaxHttpSessionCount; ++index)
 	{
 		_http_session[index].index = index;
 		push_queue(_idl_session, &_http_session[index]);
@@ -1277,6 +1305,10 @@ int GetHttpData(char **data)
 		//const char *content = (void*)tcphead + tcphead->doff*4;
 		packet = *(void**)packet;
 	} while (packet!=NULL);
+
+	g_nHttpLen += http_len;
+	LOGDEBUG("********* Current http data len = %llu Bytes! *********", g_nHttpLen);
+	
 	// malloc
 	unsigned data_len = http_len+35+10+26+26+5+1;
 	char* http_content = (char*)calloc(1, data_len);
