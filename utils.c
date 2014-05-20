@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <assert.h>
 #include <time.h>

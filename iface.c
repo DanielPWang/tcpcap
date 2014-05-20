@@ -128,7 +128,7 @@ int CapturePacket(char* buffer, size_t size)
 
 	// TODO: this is a example implent
 	struct sockaddr_in sa;
-	size_t salen = sizeof(sa);
+	socklen_t salen = sizeof(sa);
 
 	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
 

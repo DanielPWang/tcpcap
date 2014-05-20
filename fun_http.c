@@ -14,6 +14,8 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <zlib.h>
+
+#include "config.h"
 #include <iface.h>
 #include <utils.h>
 #include <define.h>
@@ -301,7 +303,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
-	int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
+	// int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
+	unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	const char *content = (void*)tcphead + tcphead->doff*4;
 	struct tcp_session *pSession = &_http_session[nIndex];
 
@@ -312,7 +315,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		{
 			LOGDEBUG("S->C packet for first response. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
 					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-			char *pszCode = memmem(content, contentlen, "HTTP/1.1 100", 12);
+			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);
 			if (pszCode == NULL)
 				pszCode = memmem(content, contentlen, "HTTP/1.0 100", 12);
 
@@ -461,7 +464,7 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	{
 		pSession->response_head_recv_flag = 0;
 		pSession->transfer_flag = HTTP_TRANSFER_NONE;
-		strlwr(content);
+		strlwr((char*)content);	// TODO: should be stupid. const char* => char*
 		LOGDEBUG("Session[%d] response head generate contentlen= %d, content= %s", nIndex, contentlen, content);
 		
 		char* content_encoding = memmem(content, contentlen, "content-encoding: gzip", 22);

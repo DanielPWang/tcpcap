@@ -86,7 +86,7 @@ void destory_queue(struct queue_t* queue);
 size_t count_char(const char* str, const char c);
 char* GetValue(const char* confname, const char* name, char* value, size_t len);
 
-char* strlwr(char *str);
+char* strlwr(char *str);	// str2low
 
 int64_t htonll(int64_t n);
 int64_t ntohll(int64_t n);

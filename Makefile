@@ -1,6 +1,6 @@
 TARGET = eru_agent
 OUTDIR = build/
-CC = gcc
+CC = clang
 
 ifdef RELEASE
 	CFLAGS = -Wall -O1
@@ -9,7 +9,7 @@ else
 endif
 
 # CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99
-CFLAGS += -fPIC -march=core2 -DVER_SVNID=9  -std=gnu99
+CFLAGS += -fPIC -march=core2 -DVER_SVNID=9  -std=gnu99 -D_GNU_SOURCE
 	
 LINKFLAGS = -Wl,-rpath,. -rdynamic
 # LINKFLAGS = -Wl,-rpath,. -shared -shared-libgcc

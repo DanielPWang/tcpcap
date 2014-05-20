@@ -120,8 +120,6 @@ int main(int argc, char* argv[])
 	LoadHttpConf(CONFIG_PATH);
 	HttpInit();
 
-	FlowInit();
-
 	// capture and process
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);
 	int nrecv = 0;

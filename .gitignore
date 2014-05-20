@@ -3,3 +3,4 @@ build
 cscope*
 tags
 *.orig
+vim.session

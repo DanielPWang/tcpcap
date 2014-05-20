@@ -16,7 +16,6 @@
 #include <server.h>
 #include <fun_all.h>
 #include <fun_http.h>
-#include <fun_flow.h>
 
 extern struct hosts_t *_monitor_hosts;
 extern size_t _monitor_hosts_count;
@@ -51,6 +50,8 @@ static int ProcessReqSetIpList(const char *pRecvData);
 volatile int g_nFlagGetData = 0;
 volatile int g_nFlagSendData = 0;
 
+// TODO: review this file.
+//
 int InitServer()
 {
 	return 1;
@@ -734,13 +735,11 @@ while_start:
 				{
 					if (MSG_TYPE_REQ_FLOW == msgHead.type)
 					{
-						AddServer(pRecvData);
 						if (0 == _flow_socket_start_time)
 							_flow_socket_start_time = time(NULL);
 					}
 					else if (MSG_TYPE_REQ_FLOW_STOP == msgHead.type)
 					{
-						StopServerFlow(pRecvData);
 					}
 
 					if (pRecvData != NULL)
@@ -772,38 +771,6 @@ while_start:
 					active = time(NULL);
 				}
 				g_nFlagGetData = 1;
-				
-				if ((_flow_socket_start_time != 0) && (time(NULL) - _flow_socket_start_time > FLOW_SEND_INTERVAL_TIME))
-				{
-					int nServerCount = GetServerCount();
-					LOGINFO("Ready to send flow info, Server flow count = %d", nServerCount);
-					if (nServerCount > 0)
-					{
-						time_t tmNow = time(NULL);
-						for (int i = 0; i < MAX_FLOW_SESSIONS; i++)
-						{
-							if ((datalen = GetFlowData(i, tmNow, &data)) > 0)
-							{
-								LOGINFO("Send flow data of _flow_session[%d]", i);
-								nSend = SendData(_client_socket, MSG_TYPE_RES_FLOW_DATA, data, datalen);
-								free((void*)data);
-								if (nSend < 0) 
-								{
-									LOGWARN0("remote client socket is error or close. recontinue.");
-									close(_client_socket);
-									_client_socket = -1;
-									goto while_start;
-								}	
-							}
-						}
-						
-						_flow_socket_start_time = time(NULL);
-					}
-					else
-					{
-						_flow_socket_start_time = 0;
-					}
-				}
 				
 				if (time(NULL) - active > 10) 
 				{
