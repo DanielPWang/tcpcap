@@ -2,3 +2,4 @@ eru_agent
 build
 cscope*
 tags
+*.orig
