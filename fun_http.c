@@ -324,16 +324,17 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				
 				return HTTP_APPEND_DROP_PACKET;
 			}
-		} 
+		}
+		else if (((pSession->ack + pSession->res0) == tcphead->seq) && (abs(tcphead->ack_seq - pSession->seq) <= 4380))
+		{ // TODO: why? check old. 
+			LOGDEBUG("Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+		}
 		else 
 		{
-			//if (bIsCurPack
-			//		&& ((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq)))
-					
-			if (bIsCurPack
+			if (bIsCurPack 
 				&& (((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq))
-					|| ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)
-					|| ((pSession->ack + pSession->res0) == tcphead->seq) ))
+					 || ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)))
 			{
 				if (pSession->later_pack_size != MAX_LATER_PACKETS)
 				{
@@ -361,14 +362,10 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				}
 			}
 			else
-			{
-				//if (bIsCurPack
-				//	&& ((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq)))
-				
+			{	// TODO: Check old.
 				if (!bIsCurPack
 					&& (((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq))
-						|| ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)
-						|| ((pSession->ack + pSession->res0) == tcphead->seq) ))
+						|| ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)))
 				{
 					return HTTP_APPEND_ADD_PACKET_LATER;
 				}
@@ -1170,11 +1167,22 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 		
 		pPlain = calloc(1, plain_len+1024);
 	}
+	else if (0 == plain_len)
+	{ // TODO: check old. 
+		if (nDataLen > 0 && nDataLen < 800000)
+		{
+			pPlain = calloc(1, 5120);
+			plain_len = -1;
+		}
+		else
+		{
+			LOGWARN0("TransGzipData, plain length = 0 and plain length >= 800KB, trans stop!");
+			return -1;
+		}
+	}
 	else
 	{
-		//pPlain = calloc(1, 5120);
-		//plain_len = -1;
-		LOGWARN0("TransGzipData, plain length <= 0 or plain length >= 10M, trans stop!");
+		LOGWARN0("TransGzipData, plain length < 0 or plain length >= 10M, trans stop!");
 		return -1;
 	}
 	

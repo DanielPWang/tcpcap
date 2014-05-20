@@ -128,7 +128,7 @@ int main(int argc, char* argv[])
 	
 	while (Living) 
 	{
-		buffer = calloc(1,RECV_BUFFER_LEN); // GetBuffer(shmptr);
+		if (buffer == NULL) buffer = malloc( RECV_BUFFER_LEN); // GetBuffer(shmptr);
 		if (buffer == NULL)
 		{
 			sleep(1);
@@ -142,23 +142,25 @@ int main(int argc, char* argv[])
 				continue;
 
 			struct ether_header *ehead = (struct ether_header*)buffer;
-			if (ehead->ether_type == htons(ETHERTYPE_IP))
+			u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
+			if (ETHERTYPE_VLAN == eth_type) {			
+				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
+			}
+			
+			if (ETHERTYPE_IP == eth_type)
 			{
-				struct iphdr *iphead = (struct iphdr*)(buffer+ETHER_HDR_LEN);
+				struct iphdr *iphead = IPHDR(buffer);
 
-				// Flow filter
-				FilterPacketForFlow(buffer, iphead);
 				if (iphead->protocol == IPPROTO_TCP)
 				{
-					int ipheadlen = iphead->ihl<<2;
-					struct tcphdr *tcphead = (struct tcphdr*)(buffer+ETHER_HDR_LEN+ipheadlen);
+					struct tcphdr *tcphead = TCPHDR(iphead);
 
 					// Http filter.
 					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
 						break;
 				}
 			}
-			memset(buffer, 0, RECV_BUFFER_LEN);
+			buffer = NULL;
 		} 
 		while (Living);
 	}
