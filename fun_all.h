@@ -22,23 +22,30 @@ struct tcp_session
 	unsigned response_head_recv_flag;  // 1:recv ok; 0:default
 	unsigned content_encoding_gzip;	   // 1:gzip; 0:no encoding
 	unsigned content_type;			   // 0:no match; 1:html; 2:file
+	unsigned finish_type;
+	unsigned force_restore_flag;
 	unsigned res0;
 	unsigned res1;
 	unsigned res2;
+	unsigned res_true_len;
 	unsigned later_pack_size;
 	unsigned index;
 	unsigned request_head_len;
 	unsigned request_head_len_valid_flag;
 	unsigned response_head_len;
 	unsigned response_head_gen_time;
+	unsigned cur_content_len;
+	unsigned part_content_len;
 	struct timeval create;	// first
-	time_t update;		// the lasttime update.
+	struct timeval update;		// the lasttime update. TODO: time_t
 	void *data;
 	void *lastdata;
 	void *pack_later;
 	void *last_pack_later;
 	char *request_head;
 	char *response_head;
+	char *cur_content;
+	char *part_content;
 };
 
 /** @brief tans "10.10.100.10:9900" to host_t 

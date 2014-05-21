@@ -68,7 +68,71 @@ int exist_file(const char* path)
 {
 	struct stat _stat;
 	int nErr = stat(path, &_stat);
-	return nErr==0? 1:0;
+	
+	return (nErr == 0) ? 1 : 0;
+}
+
+int get_file_size(const char *pszFilePath)
+{
+	assert(pszFilePath != NULL);
+	
+	int nFilesize = -1;
+	struct stat statbuff;
+	if(stat(pszFilePath, &statbuff) == 0)
+	{
+	    nFilesize = statbuff.st_size;
+	}
+	
+	return nFilesize;
+}  
+
+int dtstr2time(const char *pszDate)
+{ 
+	int rs = -1;
+	time_t t;
+	int year=0, month=0, day=0, hour=0, minute=0, second=0;
+	sscanf(pszDate, "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour, &minute, &second);
+	
+	if (year<0 || month<0 || day<0 || hour<0 || minute<0 || second<0)
+		return -1;
+
+	if (hour>23 || second>60 || minute>60)
+		return -1;
+
+	if (month==0 || day==0)
+		return -1;
+	
+	if (month<=12 && day<=31)
+	{ 
+		if (year%400==0 && month==2 && day<=29)
+			rs = 1;
+		else if (year%100 !=0 && year%4==0 && month==2 && day<=29) 
+	   		rs = 1;
+		else if ((month==1||month==3||month==5||month==7||month==8||month==10||month==12) && day<=31)
+			rs = 1;
+		else if ((month==4||month==6||month==9||month==11) && day<=30)
+			rs = 1;
+		else if (month==2 && day<=28)
+			rs = 1;
+		else
+			return -1;
+	}
+
+	if (1 == rs)
+	{
+		struct tm stm = {0};
+		stm.tm_year = year - 1900;
+		stm.tm_mon = month - 1;
+		stm.tm_mday = day;
+		stm.tm_hour = hour;
+	    stm.tm_min = minute;
+	    stm.tm_sec = second;
+		t = mktime(&stm);
+	}
+	else
+		return -1;
+	
+	return t;
 }
 /////////// LOG
 static char *_logfile = NULL;
@@ -281,4 +345,39 @@ int64_t ntohll(int64_t n)
 {
 	return (((int64_t)ntohl(n)) << 32) | ntohl(n >> 32);
 }
+
+int code_convert(char *from_charset, char *to_charset, char *inbuf, int inlen, char *outbuf, int outlen)
+{  
+	iconv_t cd;
+	char **pin = &inbuf;
+	char **pout = &outbuf;
+
+	cd = iconv_open(to_charset, from_charset);
+	if (0 == cd)  
+	{
+		LOGERROR("iconv_open error, %s", strerror(errno));
+		return -1;
+	}
+
+	memset(outbuf, 0, outlen);
+	if (iconv(cd, pin, &inlen, pout, &outlen) == -1)  
+	{
+		LOGERROR("iconv error, %s", strerror(errno));
+		return -1;
+	}
+
+	iconv_close(cd);
+	return 0;
+}  
+
+int u2g(char *inbuf, int inlen, char *outbuf, int outlen)
+{  
+	return code_convert("utf-8","gb2312", inbuf, inlen, outbuf, outlen);
+}  
+
+int g2u(char *inbuf, size_t inlen, char *outbuf, size_t outlen)
+{  
+	return code_convert("gb2312", "utf-8", inbuf, inlen, outbuf, outlen);
+}  
+
 

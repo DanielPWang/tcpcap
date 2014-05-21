@@ -91,6 +91,9 @@ char* strlwr(char *str);	// str2low
 int64_t htonll(int64_t n);
 int64_t ntohll(int64_t n);
 
+int code_convert(char *from_charset, char *to_charset, char *inbuf, int inlen, char *outbuf, int outlen);
+int u2g(char *inbuf, int inlen, char *outbuf, int outlen);
+int g2u(char *inbuf, size_t inlen, char *outbuf, size_t outlen);
 
 #endif
 

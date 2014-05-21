@@ -63,41 +63,7 @@ static struct queue_t *_whole_content = NULL;		// http_session.flag = HTTP_SESSI
 extern volatile int g_nFlagGetData;
 extern volatile int g_nFlagSendData;
 
-enum HTTP_SESSION_FLAGS { 
-	HTTP_SESSION_IDL, 
-	HTTP_SESSION_REQUESTING,
-	HTTP_SESSION_REQUEST, 
-	HTTP_SESSION_REPONSE, 
-	HTTP_SESSION_REPONSEING,
-	HTTP_SESSION_FINISH, 
-	HTTP_SESSION_TIMEOUT 
-};
-
-enum HTTP_TRANSFER_FLAGS { 
-	HTTP_TRANSFER_INIT,
-	HTTP_TRANSFER_NONE,
-	HTTP_TRANSFER_HAVE_CONTENT_LENGTH, 
-	HTTP_TRANSFER_CHUNKED,
-	HTTP_TRANSFER_WITH_HTML_END,
-	HTTP_TRANSFER_FILE
-};
-
-enum HTTP_CONTENT_TYPE { 
-	HTTP_CONTENT_NONE,
-	HTTP_CONTENT_HTML,
-	HTTP_CONTENT_FILE_PDF,
-	HTTP_CONTENT_FILE_KDH,
-	HTTP_CONTENT_FILE_CEB,
-	HTTP_CONTENT_FILE_OTHER
-};
-
-enum HTTP_APPEND_STATUS { 
-	HTTP_APPEND_DROP_PACKET = -1,
-	HTTP_APPEND_ADD_PACKET = 0,
-	HTTP_APPEND_ADD_PACKET_LATER,
-	HTTP_APPEND_FINISH_LATER,
-	HTTP_APPEND_FINISH_CURRENT
-};
+extern int _block_func_on;
 
 // IDL -> REQUESTING -> REQUEST -> REPONSEING -> REPONSE -> FINISH
 //           |------------|------------|------------------> TIMEOUT
@@ -158,6 +124,19 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 			free(pSession->response_head);
 			pSession->response_head = NULL;
 		}
+		// TODO: add by jrl why?
+		if (pSession->cur_content!=NULL)
+		{
+			free(pSession->cur_content);
+			pSession->cur_content = NULL;
+		}
+		
+		if (pSession->part_content!=NULL)
+		{
+			free(pSession->part_content);
+			pSession->part_content = NULL;
+		}
+		// END
 		
 		LOGDEBUG("Session[%d] clean response_head successfully!", pSession->index);
 		
@@ -207,6 +186,9 @@ int NewHttpSession(const char* packet)
 	LOGTRACE0(cmdline);
 	*enter = tmp;
 	
+	// TODO: want log resource.
+	//
+	// TODO: get from config
 	if ((strstr(cmdline, ".gif ") != NULL)
 		|| (strstr(cmdline, ".js ") != NULL)
 		|| (strstr(cmdline, ".js?") != NULL)
@@ -229,9 +211,10 @@ int NewHttpSession(const char* packet)
 		if (_http_session[index].flag != HTTP_SESSION_IDL && 
 			_http_session[index].flag != HTTP_SESSION_FINISH) 
 		{
-			struct tcp_session* pREQ = &_http_session[index];
-			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source && 
-				pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest) 
+			struct tcp_session* pREQ = &_http_session_array[nThreadIndex][index];
+			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source 
+				&& pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest
+				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq)  // TODO: why? add by jr
 			{ // client -> server be reuse.
 				LOGWARN("session[%d] channel is reused. flag=%d res1=%d res2=%d g_nReusedCount=%d", index, pREQ->flag, pREQ->res1, pREQ->res2, ++g_nReusedCount);
 				CleanHttpSession(pREQ);
@@ -264,7 +247,8 @@ int NewHttpSession(const char* packet)
 	pIDL->client.port = tcphead->source;
 	pIDL->server.port = tcphead->dest;
 	pIDL->create = *tv;
-	pIDL->update = tv->tv_sec;
+	// pIDL->update = tv->tv_sec;
+	pIDL->update = *tv;
 	pIDL->seq = tcphead->seq;
 	pIDL->ack = tcphead->ack_seq;
 	pIDL->data = (void*)packet;
@@ -337,6 +321,15 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		{ // TODO: why? check old. 
 			LOGDEBUG("Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
 					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+			
+			// TODO: why? add by setupid
+			if ((*(unsigned*)content == _http_image) && (pSession->transfer_flag != HTTP_TRANSFER_INIT))
+			{
+				LOGWARN("Drop this packet for response repeatly. Session[%d][%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				
+				return HTTP_APPEND_DROP_PACKET;
+			}
 		}
 		else 
 		{
@@ -1178,7 +1171,7 @@ int LoadHttpConf(const char* filename)
 }
 
 int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
-{
+{	// TODO: gzip 
 	if (pGzipData == NULL)
 		return -1;
 	
@@ -1464,7 +1457,7 @@ int GetHttpData(char **data)
 			
 			char* pTmpContent = pOldContent;
 			while (pTmpContent < http_content+data_len)
-			{
+			{	// TODO: Proc chunk
 				int nChunkLen = strtol(pTmpContent, NULL, 16);
 				if (nChunkLen > 0)
 				{
