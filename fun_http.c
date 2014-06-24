@@ -1024,8 +1024,7 @@ int HttpInit()
 
 int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
 {
-	if (NULL == _monitor_hosts)
-		return -1;
+	if (NULL == _monitor_hosts) return -1;
 	
 	const char *content = (const char *)tcphead + tcphead->doff*4;
 	unsigned *cmd = (unsigned*)content;
@@ -1047,33 +1046,6 @@ int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr*
 		}
 	}
 
-	return -1;
-}
-
-int inExcludeHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
-{
-	if (NULL == _exclude_hosts)
-		return -1;
-	
-	const char *content = (const char *)tcphead + tcphead->doff*4;
-	unsigned *cmd = (unsigned*)content;
-	
-	for (int npos = 0; npos < _exclude_hosts_count; npos++)
-	{
-		struct hosts_t *tmp = &_exclude_hosts[npos];
-		if (0 == tmp->ip.s_addr)
-			continue;
-		
-		if (tmp->ip.s_addr==INADDR_BROADCAST 
-			&& (tmp->port==tcphead->source || tmp->port==tcphead->dest || tmp->port==0u))
-			return npos;
-
-		if ( (tmp->ip.s_addr==iphead->saddr && (tmp->port==tcphead->source || tmp->port==0u))
-			 || (tmp->ip.s_addr==iphead->daddr && (tmp->port==tcphead->dest || tmp->port==0u)))
-		{
-			return npos;
-		}
-	}
 	return -1;
 }
 

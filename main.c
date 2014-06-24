@@ -25,8 +25,12 @@
 int SockManager;
 extern int SockMonitor[MONITOR_COUNT];
 size_t MemorySize;
+
 volatile int Living = 1;
 volatile int NeedReloadConfig = 0;
+
+int DEBUG = 0;
+const char* PCAPFILE = NULL;
 
 const char *MonitorFilter;
 const char* CONFIG_PATH;
@@ -126,18 +130,13 @@ int main(int argc, char* argv[])
 	
 	while (Living) 
 	{
-		if (buffer == NULL) buffer = malloc( RECV_BUFFER_LEN); // GetBuffer(shmptr);
-		if (buffer == NULL)
-		{
-			sleep(1);
-			continue;
-		}
+		if (buffer == NULL) buffer = malloc( RECV_BUFFER_LEN); // TODO:
+		if (buffer == NULL) { LOGWARN0("no memory!"); sleep(1); continue; }
 
 		do 
 		{
 			nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
-			if (nrecv == 0) 
-				continue;
+			if (nrecv == 0) continue;
 
 			struct ether_header *ehead = (struct ether_header*)buffer;
 			u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
@@ -145,12 +144,10 @@ int main(int argc, char* argv[])
 				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
 			}
 			
-			if (ETHERTYPE_IP == eth_type)
-			{
+			if (ETHERTYPE_IP == eth_type) {
 				struct iphdr *iphead = IPHDR(buffer);
 
-				if (iphead->protocol == IPPROTO_TCP)
-				{
+				if (iphead->protocol == IPPROTO_TCP) {
 					struct tcphdr *tcphead = TCPHDR(iphead);
 
 					// Http filter.

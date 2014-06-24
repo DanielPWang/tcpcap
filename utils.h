@@ -44,7 +44,8 @@ void close_log();
 	do{ if(loglevel()<=LOG_ERROR) logmsg(LOG_ERROR, "[%s:%d] %s", __FILE__, __LINE__, msg); } while (0)
 
 #define LOGFATAL0(msg) \
-	do{ if(loglevel()<=LOG_FATAL) logmsg(LOG_FATAL, "[%s:%d] %s", __FILE__, __LINE__, msg); } while (0)
+	do{ if(loglevel()<=LOG_FATAL) { fprintf(stderr, "[%s:%d] %s", __FILE__, __LINE__, msg); \
+		logmsg(LOG_FATAL, "[%s:%d] %s", __FILE__, __LINE__, msg); } } while (0)
 
 #define LOGTRACE(fmt, ...) \
 	do{ if(loglevel()<=LOG_TRACE) logmsg(LOG_TRACE, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__); } while (0)
@@ -62,7 +63,8 @@ void close_log();
 	do{ if(loglevel()<=LOG_ERROR) logmsg(LOG_ERROR, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__); } while (0)
 
 #define LOGFATAL(fmt, ...) \
-	do{ if(loglevel()<=LOG_FATAL) logmsg(LOG_FATAL, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__); } while (0)
+	do{ if(loglevel()<=LOG_FATAL) { fprintf(stderr, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__); \
+		logmsg(LOG_FATAL, "[%s:%d] " fmt, __FILE__, __LINE__, __VA_ARGS__);} } while (0)
 
 void print_bt();
 

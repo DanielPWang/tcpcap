@@ -12,82 +12,87 @@
 #include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <pcap/pcap.h>
 
-#include <utils.h>
-#include <define.h>
-#include <config.h>
+#include "utils.h"
+#include "define.h"
+#include "config.h"
 
 static int SockMonitor[MONITOR_COUNT] = {0};
 
 static int _epollfd = 0;
 static struct epoll_event _events[MONITOR_COUNT];
 static int _active_sock = 0;
+static pcap_t *pcap_live[MONITOR_COUNT] = {0};
 
-int get_iface_id(int fd, const char* device)
-{
-	struct ifreq ifr = {0};
-	strncpy(ifr.ifr_name, device, sizeof(ifr.ifr_name));
-	if (ioctl(fd, SIOCGIFINDEX, &ifr) == -1) {
-		perror("[ERROR] ");
-		return -1;
-	}
-	return ifr.ifr_ifindex;
-}
-
-int active_device(int fd, const char* device)
-{
-	struct ifreq ifr = {0};
-	strncpy(ifr.ifr_name, device, sizeof(ifr.ifr_name));
-	if (ioctl(fd, SIOCGIFFLAGS, &ifr) == -1) {
-		perror("[ERROR] ");
-		return -1;
-	}
-	ifr.ifr_flags |= IFF_PROMISC;
-	ifr.ifr_flags |= IFF_UP;
-	if (ioctl(fd, SIOCSIFFLAGS, &ifr) == -1) {
-		perror("[ERROR] ");
-		return -1;
-	}
-	return 0;
-}
+extern int DEBUG;
+extern char* PCAPFILE;
 
 int open_monitor(const char* interface, const char* fliter)
 {
-	struct sockaddr_ll sall = {0};
+	char* errbuff = (char*)malloc(PCAP_ERRBUF_SIZE);
+	pcap_t *p = pcap_open_live(interface, 65535, 1, 0, errbuff);
+	if (p == NULL) {
+		LOGFATAL("Cannt open %s [%s]", interface, errbuff);
+		abort();
+	}
+	struct bpf_program fp;
+	int err = pcap_compile(p, &fp, fliter, 0, PCAP_NETMASK_UNKNOWN);
+	if (err < 0 ) {
+		LOGFATAL("pcap_compile error: %s", pcap_geterr(p));
+		abort();
+	}
+	if (pcap_setfilter(p, &fp) < 0) {
+		LOGFATAL("pcap_setfilter error: %s", pcap_geterr(p));
+		abort();
+	}
+	pcap_freecode(&fp);
 
-	int fd = socket(PF_PACKET, SOCK_RAW, htons(IPPROTO_TCP));
-	if (fd < 0) {
-		perror("[ERROR] ");
-		return -1;
+	free(errbuff);
+
+	return pcap_get_selectable_fd(p);
+}
+
+static pcap_t *Offline = NULL;
+int OpenPcapFile(const char* pcapfile, const char* filter)
+{
+	char* errbuff = (char*)malloc(PCAP_ERRBUF_SIZE);
+
+	Offline = pcap_open_offline(pcapfile, errbuff);
+	if (Offline == NULL) {
+		LOGFATAL("open offline failure. %s", errbuff);
+		printf("[FATAL] cannt open %s", PCAPFILE);
+		abort();
+	}
+	struct bpf_program fp;
+	int err = pcap_compile(Offline, &fp, filter, 0, PCAP_NETMASK_UNKNOWN);
+	if (err < 0 ) {
+		LOGFATAL("pcap_compile error: %s", pcap_geterr(Offline));
+		abort();
+	}
+	if (pcap_setfilter(Offline, &fp) < 0) {
+		LOGFATAL("pcap_setfilter error: %s", pcap_geterr(Offline));
+		abort();
 	}
 
-	sall.sll_family = AF_PACKET;
-	sall.sll_protocol = htons(ETH_P_ALL);
-	sall.sll_ifindex = get_iface_id(fd, interface);
-	if (bind(fd, (struct sockaddr*)&sall, sizeof(sall)) == -1) {
-		perror("[ERROR] ");
-		close(fd);
-		return -1;
-	}
-
-	if (active_device(fd, interface) == -1) {
-		LOGERROR0("Fail to active device");
-		close(fd);
-		return -1;
-	}
-		
-	return fd;
+	pcap_freecode(&fp);
+	free(errbuff);
+	return 0;
 }
 
 int OpenMonitorDevs()
 {
+	char* filter = (char*) malloc(4000);
+	GetValue(CONFIG_PATH, "filter", filter, 4000);
+
+	if ( DEBUG ) { return OpenPcapFile(PCAPFILE, filter); }
+
 	char* value = (char*)calloc(1,1024);
 	ASSERT(value!=NULL);
 	if (GetValue(CONFIG_PATH, "monitor", value, 1024)==NULL || value[0]=='\0') {
 		LOGFATAL("cannt get monitor from %s", CONFIG_PATH);
 		abort();
 	}
-
 	ASSERT(_epollfd==0);
 	ASSERT(_active_sock == 0);
 	_epollfd = epoll_create(MONITOR_COUNT);
@@ -115,23 +120,46 @@ int OpenMonitorDevs()
 		}
 	}
 	free(value);
+	free(filter);
 	return _active_sock;
+}
+
+int GetPacket_Debug(char* buffer, size_t size)
+{
+	const u_char *pcap_next(pcap_t *p, struct pcap_pkthdr *h);
+	struct pcap_pkthdr *h;
+	const u_char* data;
+	int err = pcap_next_ex(Offline, &h, &data);
+	if (err == -2) {
+		LOGINFO0("will exit from debuging...");
+
+	}
+	if (h->caplen != h->len) {
+		LOGFATAL("pcap_next: buffer not longer. caplen=%u len=%u", h->caplen, h->len);
+		abort();
+	}
+	if (h->len > size) {
+		LOGFATAL0("expect more buffer.");
+		abort();
+	}
+	memcpy(buffer, data, h->len);
+	return h->len;
 }
 
 int CapturePacket(char* buffer, size_t size)
 {
+	if (DEBUG) return GetPacket_Debug(buffer, size);
+
 	assert(_epollfd > 0);
 	assert(_active_sock > 0);
 
 	int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
 	if (nfds < 1 ) return 0;	// test exit.
 
-	// TODO: this is a example implent
 	struct sockaddr_in sa;
 	socklen_t salen = sizeof(sa);
 
 	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
-
 	if (nRecv == -1) { return 0; }
 
 	return nRecv;
