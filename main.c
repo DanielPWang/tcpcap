@@ -78,6 +78,12 @@ void ProcessCMD(int argc, char* argv[])
 	if (argc>1) {
 		if (strcmp(argv[1],"-v")==0){
 			ShowUsage(0);
+		} else if (strcmp(argv[1], "-d")==0) {
+			// TODO: debug
+		} else if (strcmp(argv[1], "-r")==0) {
+			DEBUG = 1;
+			PCAPFILE = strdup(argv[2]);
+			return;
 		} else {
 			ShowUsage(-1);
 		}
@@ -87,6 +93,8 @@ void ProcessCMD(int argc, char* argv[])
 
 void CheckRoot()
 {
+	if (DEBUG > 0) return;
+
 	if (getuid() != 0) {
 		fprintf(stderr, "You must be root\n");
 		exit(3);

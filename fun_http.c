@@ -211,7 +211,8 @@ int NewHttpSession(const char* packet)
 		if (_http_session[index].flag != HTTP_SESSION_IDL && 
 			_http_session[index].flag != HTTP_SESSION_FINISH) 
 		{
-			struct tcp_session* pREQ = &_http_session_array[nThreadIndex][index];
+			// struct tcp_session* pREQ = &_http_session_array[nThreadIndex][index];
+			struct tcp_session* pREQ = &_http_session[index]; // TODO: up line
 			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source 
 				&& pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest
 				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq)  // TODO: why? add by jr
@@ -220,7 +221,7 @@ int NewHttpSession(const char* packet)
 				CleanHttpSession(pREQ);
 				break;
 			} 
-			else if (tv->tv_sec - pREQ->update > g_nHttpTimeout)	// TODO: HTTP_TIME_OUT
+			else if (tv->tv_sec - pREQ->update.tv_sec > g_nHttpTimeout)	// TODO: HTTP_TIME_OUT
 			{
 				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
 				CleanHttpSession(pREQ);
@@ -308,11 +309,11 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				LOGWARN("Drop this packet for state 100 continue. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
 							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 
-				pSession->flag = HTTP_SESSION_REPONSEING;
+				pSession->flag = HTTP_SESSION_RESPONSEING;
 				pSession->seq = tcphead->ack_seq;
 				pSession->ack = tcphead->seq;
 				pSession->res0 = contentlen;
-				pSession->update = tv->tv_sec;
+				pSession->update = *tv;
 				
 				return HTTP_APPEND_DROP_PACKET;
 			}
@@ -325,8 +326,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 			// TODO: why? add by setupid
 			if ((*(unsigned*)content == _http_image) && (pSession->transfer_flag != HTTP_TRANSFER_INIT))
 			{
-				LOGWARN("Drop this packet for response repeatly. Session[%d][%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-					nThreadIndex, nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
+				LOGWARN("Drop this packet for response repeatly. Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
+					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 				
 				return HTTP_APPEND_DROP_PACKET;
 			}
@@ -386,12 +387,12 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 				nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 	}
 	
-	pSession->flag = HTTP_SESSION_REPONSEING;
+	pSession->flag = HTTP_SESSION_RESPONSEING;
 	pSession->seq = tcphead->ack_seq;
 	pSession->ack = tcphead->seq;
 	pSession->res0 = contentlen;
 	if (bIsCurPack)
-		pSession->update = tv->tv_sec;
+		pSession->update = *tv;
 
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
@@ -741,7 +742,7 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	pSession->ack = tcphead->ack_seq;
 	pSession->seq = tcphead->seq;
 	pSession->res0 = contentlen;
-	pSession->update = tv->tv_sec;
+	pSession->update = *tv;
 
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
@@ -841,7 +842,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 			continue;
 
 		// process timeout
-		if (tv->tv_sec-pREQ->update > g_nHttpTimeout) // TODO: HTTP_TIMEOUT
+		if (tv->tv_sec-pREQ->update.tv_sec > g_nHttpTimeout) // TODO: HTTP_TIMEOUT
 		{
 			LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
 			CleanHttpSession(pREQ);
@@ -1068,8 +1069,7 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 
 	pthread_mutex_lock(&_host_ip_lock);
 	
-	if ((inHosts(buffer, iphead, tcphead) == -1) 
-		|| (inExcludeHosts(buffer, iphead, tcphead) != -1))
+	if ((inHosts(buffer, iphead, tcphead) == -1))
 	{
 		struct in_addr sip; 
 		struct in_addr dip; 

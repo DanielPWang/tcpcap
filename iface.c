@@ -77,7 +77,7 @@ int OpenPcapFile(const char* pcapfile, const char* filter)
 
 	pcap_freecode(&fp);
 	free(errbuff);
-	return 0;
+	return 1;
 }
 
 int OpenMonitorDevs()

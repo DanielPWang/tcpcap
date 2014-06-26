@@ -5,7 +5,7 @@ CC = clang
 ifdef RELEASE
 	CFLAGS = -Wall -O1
 else
-	CFLAGS = -ggdb -O0 
+	CFLAGS = -ggdb -O0 -pg
 endif
 
 # CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99
@@ -21,7 +21,7 @@ INCFILES = $(wildcard *.h)
 SRCFILES = $(wildcard *.c)
 OBJFILES = $(patsubst %.c,$(OUTDIR)%.o,$(SRCFILES))
 
-LIBRARYS = -lpthread -lz
+LIBRARYS = -lpthread -lz -lpcap
 
 all: $(OUTDIR) $(TARGET)
 	@echo 'End compiling. $(shell date +"%F %T")'
