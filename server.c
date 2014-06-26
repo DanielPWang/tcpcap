@@ -758,7 +758,9 @@ while_start:
 					g_nFlagGetData = 1;
 					g_nFlagSendData = 0;
 					LOGINFO("send http_info[%d] %s", datalen, data);
-					nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
+					// TODO: test 
+					// nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
+					nSend = 100;
 					free((void*)data);
 					g_nFlagSendData = 1;
 					if (nSend < 0) 

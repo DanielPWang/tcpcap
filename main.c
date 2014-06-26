@@ -164,6 +164,7 @@ int main(int argc, char* argv[])
 		}
 	}
 	LOGINFO0("ready to exit...");
+	HttpStop();
 	StopServer();
 	LOGINFO0("exit server...");
 	close_log();

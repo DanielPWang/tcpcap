@@ -30,6 +30,8 @@ size_t _exclude_hosts_count = 0;
 
 pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
 
+// TODO: mutil thread to process http
+static pthread_t _http_thread_id[HTTP_PROCESS_THREADS];
 //static char**  _monitor_uris = NULL;
 //static size_t _monitor_uris_count = 0;
 
@@ -67,7 +69,7 @@ extern int _block_func_on;
 
 // IDL -> REQUESTING -> REQUEST -> REPONSEING -> REPONSE -> FINISH
 //           |------------|------------|------------------> TIMEOUT
-extern volatile int Living;
+volatile int _http_living = 1;
 static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
@@ -897,9 +899,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 
 void *HTTP_Thread(void* param)
 {
-	volatile int *active = (int*)param;
-	while (*active)
-	{
+	while (_http_living) {
 		const char* packet = pop_queue(_packets);
 		if (packet == NULL) {
 			sleep(0);
@@ -962,7 +962,22 @@ void *HTTP_Thread(void* param)
 			free((void*)packet);
 		}
 	}
+	printf("Exit http thread.\n");
 	return NULL;
+}
+
+int HttpStop()
+{
+	while (DEBUG) {	// TODO: I want to process all packets.
+		if (len_queue(_packets)==0 && len_queue(_whole_content)==0) break;
+		sleep(1);
+	}
+	_http_living = 0;
+	void *retvl = NULL;
+	for (int n=0; n<HTTP_PROCESS_THREADS; ++n) {
+		int err = pthread_join(_http_thread_id[n], &retvl);
+	}
+	return 0;
 }
 
 int HttpInit()
@@ -1014,11 +1029,10 @@ int HttpInit()
 		push_queue(_idl_session, &_http_session[index]);
 	}
 
-	//for (int n=0; n<1; ++n) {
-	pthread_t pthreadid;
-	int err = pthread_create(&pthreadid, NULL, &HTTP_Thread, (void*)&Living);
-	ASSERT(err==0);
-	// }
+	for (int n=0; n<HTTP_PROCESS_THREADS; ++n) {
+		int err = pthread_create(&_http_thread_id[n], NULL, &HTTP_Thread, (void*)&_http_living);
+		ASSERT(err >= 0);
+	}
 
 	return _packets==NULL? -1:0;
 }

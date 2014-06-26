@@ -12,7 +12,10 @@
 #define HTTP_HOST_PATH_FILE "./config/http_host_ip.lst"
 #define EXCLUDE_HOST_PATH_FILE "./config/exclude_host_ip.lst"
 #define VALUE_LENGTH_MAX  (1024*60)
+
+#define HTTP_PROCESS_THREADS 1
 extern const char* CONFIG_PATH;
+extern int DEBUG;
 
 // capture
 #define RECV_BUFFER_LEN   4000 // 8192

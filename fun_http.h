@@ -67,6 +67,7 @@ enum HTTP_SPECIAL_STATE {
 
 // int isHTTP(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int HttpInit();
+int HttpStop();
 int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
