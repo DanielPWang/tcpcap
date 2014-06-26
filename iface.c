@@ -136,6 +136,7 @@ int GetPacket_Debug(char* buffer, size_t size)
 		LOGINFO0("will exit from debuging...");
 		printf("will exit from debuging. %ull\n", total_count);
 		Living = 0;
+		return 0;
 	}
 	++total_count;
 	if (h->caplen != h->len) {

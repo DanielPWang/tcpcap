@@ -1068,11 +1068,17 @@ int PushHttpPack(const char* buffer, const struct iphdr* iphead, const struct tc
 {	
 	struct timeval *tv = (struct timeval*)buffer;
 	gettimeofday(tv, NULL);
-	int err = push_queue(_packets, (const void*) buffer);
-	if (err < 0) 
-	{
+	int err = 0;
+DEBUG_LOOP:
+	err = push_queue(_packets, (const void*) buffer);
+	if (err < 0) {
 		LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
+		if (DEBUG) {
+			sleep(1);
+			goto DEBUG_LOOP;
+		}
 	}
+
 	return err;
 }
 
