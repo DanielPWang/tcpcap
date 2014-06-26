@@ -2,7 +2,9 @@
 #define __FUN_ALL_H__
 
 #include <sys/socket.h>
+#include <netinet/ip.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <time.h>
 
 struct hosts_t
@@ -52,6 +54,7 @@ struct tcp_session
  *	returns nonzero if the address is valid
  **/
 int str_ipp(const char* ipport, struct hosts_t* hosts);
+void *inHosts(const void *hosts, const struct hosts_t *host);
 
 #define IPHDR(packet) (struct iphdr*)((void*)(packet) + ((((struct ether_header*)(packet))->ether_type == htons(ETHERTYPE_IP)) ? ETHER_HDR_LEN : (ETHER_HDR_LEN+4)))
 #define TCPHDR(ippacket) (struct tcphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)

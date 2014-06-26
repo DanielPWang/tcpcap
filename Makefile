@@ -1,6 +1,6 @@
 TARGET = eru_agent
 OUTDIR = build/
-CC = clang
+CC = gcc
 
 ifdef RELEASE
 	CFLAGS = -Wall -O1

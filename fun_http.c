@@ -22,19 +22,7 @@
 #include <fun_all.h>
 #include <fun_http.h>
 
-struct hosts_t *_monitor_hosts = NULL;
-size_t _monitor_hosts_count = 0;
-
-struct hosts_t *_exclude_hosts = NULL;
-size_t _exclude_hosts_count = 0;
-
 pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
-
-//static char**  _monitor_uris = NULL;
-//static size_t _monitor_uris_count = 0;
-
-//static char**  _ignore_request = NULL;
-//static size_t _ignore_request_count = 0;
 
 static struct queue_t *_packets = NULL;
 
@@ -72,10 +60,9 @@ static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
 
-// TODO: 先不处理ignore和uri
+// TODO: 
 //
-int isRelation(const struct iphdr *ip, const struct tcphdr *tcp,
-		const struct tcp_session* session)
+int isRelation(const struct iphdr *ip, const struct tcphdr *tcp, const struct tcp_session* session)
 {
 	// TODO
 	return 1;
@@ -211,7 +198,7 @@ int NewHttpSession(const char* packet)
 		if (_http_session[index].flag != HTTP_SESSION_IDL && 
 			_http_session[index].flag != HTTP_SESSION_FINISH) 
 		{
-			struct tcp_session* pREQ = &_http_session_array[nThreadIndex][index];
+			struct tcp_session* pREQ = &_http_session[index];
 			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source 
 				&& pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest
 				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq)  // TODO: why? add by jr
@@ -1022,32 +1009,6 @@ int HttpInit()
 	return _packets==NULL? -1:0;
 }
 
-int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
-{
-	if (NULL == _monitor_hosts) return -1;
-	
-	const char *content = (const char *)tcphead + tcphead->doff*4;
-	unsigned *cmd = (unsigned*)content;
-
-	for (int npos = 0; npos < _monitor_hosts_count; npos++)
-	{
-		struct hosts_t *tmp = &_monitor_hosts[npos];
-		if (0 == tmp->ip.s_addr)
-			continue;
-		
-		if (tmp->ip.s_addr==INADDR_BROADCAST 
-			&& (tmp->port==tcphead->source || tmp->port==tcphead->dest || tmp->port==0u))
-			return npos;
-
-		if ( (tmp->ip.s_addr==iphead->saddr && (tmp->port==tcphead->source || tmp->port==0u) && (*cmd != _get_image && *cmd != _post_image))
-			 || (tmp->ip.s_addr==iphead->daddr && (tmp->port==tcphead->dest || tmp->port==0u)))
-		{
-			return npos;
-		}
-	}
-
-	return -1;
-}
 
 int PushHttpPack(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
 {	
@@ -1068,6 +1029,10 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 
 	pthread_mutex_lock(&_host_ip_lock);
 	
+	struct hosts_t host = { {iphead->saddr}, tcphead->source };
+	if (inHosts
+	const char *content = (const char *)tcphead + tcphead->doff*4;
+	unsigned *cmd = (unsigned*)content;
 	if ((inHosts(buffer, iphead, tcphead) == -1) 
 		|| (inExcludeHosts(buffer, iphead, tcphead) != -1))
 	{
@@ -1090,56 +1055,6 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 	pthread_mutex_unlock(&_host_ip_lock);
 	
 	return nRs;
-}
-
-// Load rule from config.
-int LoadHttpConf(const char* filename)
-{
-	// dont support reload in runing...
-	ASSERT((NULL == _monitor_hosts) && (NULL == _exclude_hosts));
-	// capture these hosts
-	char *left, *right, *ipport;
-	int n = 0, nDataLen = 0;
-
-	char* pFileData = (char*)calloc(1, VALUE_LENGTH_MAX+1);
-	ASSERT(pFileData != NULL);
-	
-	char* httphosts = pFileData;
-
-	nDataLen = GetFileData(HTTP_HOST_PATH_FILE, httphosts, VALUE_LENGTH_MAX);
-	if (nDataLen > 0)
-	{
-		_monitor_hosts_count = count_char(httphosts, '\n') + 1;
-		_monitor_hosts = (struct hosts_t *)calloc(sizeof(*_monitor_hosts), _monitor_hosts_count);
-
-		for(left=httphosts; ;left=NULL) {
-			ipport = strtok_r(left, "\n", &right);
-			if (ipport==NULL) break;
-			LOGINFO("monitor host %s", ipport);
-			if (str_ipp(ipport, &_monitor_hosts[n])) { ++n; }
-		}
-	}
-
-	n = 0;
-	char* excludehosts = pFileData;
-	memset(excludehosts, 0, VALUE_LENGTH_MAX+1);
-	nDataLen = GetFileData(EXCLUDE_HOST_PATH_FILE, excludehosts, VALUE_LENGTH_MAX);
-	if (nDataLen > 0)
-	{
-		_exclude_hosts_count = count_char(excludehosts, '\n') + 1;
-		_exclude_hosts = (struct hosts_t *)calloc(sizeof(*_exclude_hosts), _exclude_hosts_count);
-
-		for(left=excludehosts; ;left=NULL) {
-			ipport = strtok_r(left, "\n", &right);
-			if (ipport==NULL) break;
-			LOGINFO("exclude host %s", ipport);
-			if (str_ipp(ipport, &_exclude_hosts[n])) { ++n; }
-		}
-	}
-
-	free(pFileData);
-		
-	return 0;
 }
 
 int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
