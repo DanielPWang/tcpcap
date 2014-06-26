@@ -126,7 +126,6 @@ int OpenMonitorDevs()
 
 int GetPacket_Debug(char* buffer, size_t size)
 {
-	const u_char *pcap_next(pcap_t *p, struct pcap_pkthdr *h);
 	struct pcap_pkthdr *h;
 	const u_char* data;
 	int err = pcap_next_ex(Offline, &h, &data);

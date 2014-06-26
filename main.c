@@ -141,31 +141,27 @@ int main(int argc, char* argv[])
 		if (buffer == NULL) buffer = malloc( RECV_BUFFER_LEN); // TODO:
 		if (buffer == NULL) { LOGWARN0("no memory!"); sleep(1); continue; }
 
-		do 
-		{
-			nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
-			if (nrecv == 0) continue;
+		nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
+		if (nrecv == 0) continue;
 
-			struct ether_header *ehead = (struct ether_header*)buffer;
-			u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
-			if (ETHERTYPE_VLAN == eth_type) {			
-				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
-			}
-			
-			if (ETHERTYPE_IP == eth_type) {
-				struct iphdr *iphead = IPHDR(buffer);
+		struct ether_header *ehead = (struct ether_header*)buffer;
+		u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
+		if (ETHERTYPE_VLAN == eth_type) {			
+			eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
+		}
+		
+		if (ETHERTYPE_IP == eth_type) {
+			struct iphdr *iphead = IPHDR(buffer);
 
-				if (iphead->protocol == IPPROTO_TCP) {
-					struct tcphdr *tcphead = TCPHDR(iphead);
+			if (iphead->protocol == IPPROTO_TCP) {
+				struct tcphdr *tcphead = TCPHDR(iphead);
 
-					// Http filter.
-					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
-						break;
+				// Http filter.
+				if (FilterPacketForHttp(buffer, iphead, tcphead) >= 0) {
+					buffer = NULL;
 				}
 			}
-			buffer = NULL;
-		} 
-		while (Living);
+		}
 	}
 	LOGINFO0("ready to exit...");
 	StopServer();
