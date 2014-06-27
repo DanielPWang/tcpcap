@@ -747,6 +747,15 @@ while_start:
 				}
 			}
 
+			// TODO: begin test
+			if (DEBUG) {
+				char* data;
+				size_t datalen;
+				if ((datalen = GetHttpData(&data)) > 0) {
+					free((void*)data);
+				}
+			}
+			// TODO: end test
 			if (_client_socket > 0)
 			{
 				char *data = NULL;
@@ -758,8 +767,7 @@ while_start:
 					g_nFlagGetData = 1;
 					g_nFlagSendData = 0;
 					LOGINFO("send http_info[%d] %s", datalen, data);
-					// TODO: test 
-					// nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
+					nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
 					nSend = 100;
 					free((void*)data);
 					g_nFlagSendData = 1;

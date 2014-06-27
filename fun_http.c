@@ -154,6 +154,7 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 	return pSession;
 }
 
+char* _IGNORE_EXT[] = { ".gif", ".js", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
 int NewHttpSession(const char* packet)
 {
 	struct timeval *tv = (struct timeval*)packet;
@@ -161,26 +162,10 @@ int NewHttpSession(const char* packet)
 	struct tcphdr *tcphead=TCPHDR(iphead);
 	unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	char *content = (void*)tcphead + tcphead->doff*4;
-	char* enter = NULL;
-	for (int i = 0; i < contentlen; i++)
-	{
-		if (content[i] == '\r')
-		{
-			enter = &content[i];
-			break;
-		}
-		else if (content[i] == '\n')
-		{
-			enter = &content[i];
-			LOGERROR0("The end of first pack head line is N!");
-			break;
-		}
-		
-	}
-	
-	if (NULL == enter)
-	{
-		return -1;
+	char* enter = strchr(content, '\r');
+	if (enter == NULL) {
+		enter = strchr(content, '\n');
+		if (enter == NULL) return -1;
 	}
 	
 	char tmp = *enter;
@@ -189,21 +174,8 @@ int NewHttpSession(const char* packet)
 	LOGTRACE0(cmdline);
 	*enter = tmp;
 	
-	// TODO: want log resource.
-	//
-	// TODO: get from config
-	if ((strstr(cmdline, ".gif ") != NULL)
-		|| (strstr(cmdline, ".js ") != NULL)
-		|| (strstr(cmdline, ".js?") != NULL)
-		|| (strstr(cmdline, ".css ") != NULL)
-		|| (strstr(cmdline, ".jpg ") != NULL)
-		|| (strstr(cmdline, ".ico ") != NULL)
-		|| (strstr(cmdline, ".bmp ") != NULL)
-		|| (strstr(cmdline, ".png ") != NULL))
-		//|| (strstr(cmdline, ".tif ") != NULL)
-		//|| (strstr(cmdline, ".tiff ") != NULL))
-	{
-		return -3;
+	for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
+		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;
 	}
 	
 	// find IDL session
@@ -1074,11 +1046,11 @@ int PushHttpPack(const char* buffer, const struct iphdr* iphead, const struct tc
 DEBUG_LOOP:
 	err = push_queue(_packets, (const void*) buffer);
 	if (err < 0) {
-		LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
 		if (DEBUG) {
 			sleep(1);
 			goto DEBUG_LOOP;
 		}
+		LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
 	}
 
 	return err;
