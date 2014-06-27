@@ -263,14 +263,14 @@ int push_queue(struct queue_t* queue, const void* p)
 	struct _queue_fixed* _queue = (struct _queue_fixed*)queue;
 	int _head = -1;
 	
-	pthread_mutex_lock(&_queue->lock);
 	if (_queue->size < _queue->max_size) {
 		_head = _queue->head++;
 		if (_queue->head == _queue->max_size) _queue->head = 0;
 		_queue->points[_head] = p;
+		pthread_mutex_lock(&_queue->lock);
 		++_queue->size;
+		pthread_mutex_unlock(&_queue->lock);
 	}
-	pthread_mutex_unlock(&_queue->lock);
 	return _head;
 }
 size_t len_queue(struct queue_t* queue)
@@ -291,13 +291,13 @@ void* pop_queue(struct queue_t* queue)
 	struct _queue_fixed* _queue = (struct _queue_fixed*)queue;
 
 	void *p = NULL;
-	pthread_mutex_lock(&_queue->lock);
 	if (_queue->size > 0) {
-		--_queue->size;
 		p = (void*)_queue->points[_queue->tail++];
 		if (_queue->tail == _queue->max_size) _queue->tail = 0;
+		pthread_mutex_lock(&_queue->lock);
+		--_queue->size;
+		pthread_mutex_unlock(&_queue->lock);
 	}
-	pthread_mutex_unlock(&_queue->lock);
 	return p;
 }
 void destory_queue(struct queue_t* queue)

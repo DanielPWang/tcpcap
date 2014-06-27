@@ -16,11 +16,12 @@
 #include <zlib.h>
 
 #include "config.h"
-#include <iface.h>
-#include <utils.h>
-#include <define.h>
-#include <fun_all.h>
-#include <fun_http.h>
+#include "iface.h"
+#include "utils.h"
+#include "define.h"
+#include "fun_all.h"
+#include "fun_http.h"
+#include "statis.h"
 
 struct hosts_t *_monitor_hosts = NULL;
 size_t _monitor_hosts_count = 0;
@@ -905,6 +906,7 @@ void *HTTP_Thread(void* param)
 			sleep(0);
 			continue;
 		}
+		INC_POP_PACKETS;
 
 		struct timeval *tv = (struct timeval*)packet;
 		struct iphdr *iphead = IPHDR(packet);

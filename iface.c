@@ -127,18 +127,15 @@ int OpenMonitorDevs()
 
 int GetPacket_Debug(char* buffer, size_t size)
 {
-	static uint64_t total_count = 0u;
 	sleep(0);
 	struct pcap_pkthdr *h;
 	const u_char* data;
 	int err = pcap_next_ex(Offline, &h, &data);
 	if (err == -2) {
 		LOGINFO0("will exit from debuging...");
-		printf("will exit from debuging. %ull\n", total_count);
 		Living = 0;
 		return 0;
 	}
-	++total_count;
 	if (h->caplen != h->len) {
 		LOGFATAL("pcap_next: buffer not longer. caplen=%u len=%u", h->caplen, h->len);
 		abort();

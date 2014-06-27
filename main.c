@@ -15,12 +15,13 @@
 #include <netinet/udp.h>
 #include <arpa/inet.h>
 
-#include <utils.h>
-#include <iface.h>
-#include <config.h>
-#include <fun_http.h>
-#include <server.h>
+#include "utils.h"
+#include "iface.h"
+#include "config.h"
+#include "fun_http.h"
+#include "server.h"
 #include "define.h"
+#include "statis.h"
 
 int SockManager;
 extern int SockMonitor[MONITOR_COUNT];
@@ -144,6 +145,8 @@ int main(int argc, char* argv[])
 		nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
 		if (nrecv == 0) continue;
 
+		INC_TOTAL_PCAP;
+
 		struct ether_header *ehead = (struct ether_header*)buffer;
 		u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
 		if (ETHERTYPE_VLAN == eth_type) {			
@@ -168,6 +171,7 @@ int main(int argc, char* argv[])
 	StopServer();
 	LOGINFO0("exit server...");
 	close_log();
+	PrintStatis();
 	return 0;
 }
 

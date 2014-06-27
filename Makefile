@@ -5,7 +5,7 @@ CC = gcc
 ifdef RELEASE
 	CFLAGS = -Wall -O1
 else
-	CFLAGS = -ggdb -O0 -pg
+	CFLAGS = -g -O0 -pg
 endif
 
 # CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99
