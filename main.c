@@ -130,7 +130,7 @@ int main(int argc, char* argv[])
 	int nerr = StartServer();
 	ASSERT(nerr == 0);
 	// init protocol_proce
-	LoadHttpConf(CONFIG_PATH);
+	LoadHttpConf(HTTP_HOST_PATH_FILE);
 	HttpInit();
 
 	// capture and process

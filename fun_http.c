@@ -1142,25 +1142,7 @@ int LoadHttpConf(const char* filename)
 		}
 	}
 
-	n = 0;
-	char* excludehosts = pFileData;
-	memset(excludehosts, 0, VALUE_LENGTH_MAX+1);
-	nDataLen = GetFileData(EXCLUDE_HOST_PATH_FILE, excludehosts, VALUE_LENGTH_MAX);
-	if (nDataLen > 0)
-	{
-		_exclude_hosts_count = count_char(excludehosts, '\n') + 1;
-		_exclude_hosts = (struct hosts_t *)calloc(sizeof(*_exclude_hosts), _exclude_hosts_count);
-
-		for(left=excludehosts; ;left=NULL) {
-			ipport = strtok_r(left, "\n", &right);
-			if (ipport==NULL) break;
-			LOGINFO("exclude host %s", ipport);
-			if (str_ipp(ipport, &_exclude_hosts[n])) { ++n; }
-		}
-	}
-
 	free(pFileData);
-		
 	return 0;
 }
 
