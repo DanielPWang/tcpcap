@@ -10,12 +10,14 @@
 #include <pthread.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/epoll.h>
 
 #include <define.h>
 #include <utils.h>
 #include <server.h>
 #include <fun_all.h>
 #include <fun_http.h>
+#include "statis.h"
 
 extern struct hosts_t *_monitor_hosts;
 extern size_t _monitor_hosts_count;
@@ -25,8 +27,10 @@ extern size_t _exclude_hosts_count;
 
 extern pthread_mutex_t _host_ip_lock;
 
+#define SERV_CLIENT_COUNT 5
 static int _srv_socket = -1;
 static int _client_socket = -1;
+static int _srv_epoll = -1;
 static char _client_ip[16] = {0};
 
 static int _client_config_socket = -1;
@@ -36,6 +40,7 @@ static time_t _flow_socket_start_time = 0;
 
 static volatile int _runing = 1;
 static pthread_t _srv_thread;
+static pthread_t _cli_thread;
 static struct msg_head _msg_heart_hit = {0};
 
 static int SetupTCPServer(int server_port);
@@ -43,7 +48,7 @@ static int Unblock(int sock);
 static int WriteSocketData(int sock, const void *pBuffer, int nWriteSize);
 static int ReadSocketData(int sock, char *pBuffer, int nReadSize);
 static int RecvData(int sock, struct msg_head *pMsgHead, char **pData);
-static int SendData(int sock, unsigned char msg_type, const void *pData, unsigned int data_length);
+static int SendData(int sock, unsigned char msg_type, const char*pData, int data_length);
 static int ProcessReqGetIpList();
 static int ProcessReqSetIpList(const char *pRecvData);
 
@@ -70,145 +75,57 @@ int Unblock(int sock)
     return 0;
 }
 
-int WriteSocketData(int sock, const void *pBuffer, int nWriteSize)
+int _send_all(int sock, const char* data, int len)
 {
-	int nWrite = 0;
-	int nWriteTotal = 0;
-	int nRepeatForFD = 0;
-	int nRepeatForSel = 0;
-	fd_set fdwrite;
-	struct timeval tv;
-
-	do
-	{
-		FD_ZERO(&fdwrite);
-		FD_SET(sock, &fdwrite);
-		tv.tv_sec = 0;
-		tv.tv_usec = SELECT_TIMEOUT;
-		int nRet = select(sock + 1, 0, &fdwrite, 0, &tv);
-		if (nRet > 0)
-		{
-			if (FD_ISSET(sock, &fdwrite))
-			{
-				nWrite = send(sock, pBuffer +  nWriteTotal, nWriteSize - nWriteTotal, 0);
-				if (-1 == nWrite)
-				{
-					if (EAGAIN == errno)
-					{
-						LOGERROR0("Send data with error EAGAIN");
-						return -1;
-						//continue;
-					}
-
+	if (data==NULL) return 0;
+	int sent = 0u;
+	while (sent < len) {
+		int s = send(sock, &data[sent], len-sent, 0);
+		if (s < 0) {
+			if (errno == EINTR) {
+				if (_runing==0) {
 					return -1;
 				}
-				else if (0 == nWrite)
-				{
-					return -1;
-				}
-				nWriteTotal += nWrite;
+				continue;
 			}
-			else
-			{
-				if (++nRepeatForFD >= 10000)
-				{
-					LOGWARN0("Total time of FD_ISSET=0 is more than 5 minutes!");
-					return -1;
-				}
-			}
+			char* p = (char*)malloc(1024);
+			p[1023] = '\0';
+			LOGERROR("send return %d: %s", errno, strerror_r(errno, p, 1023)); 
+			free(p);
+			break;
 		}
-		else if (-1 == nRet)
-		{
-			return -1;
-		}
-		else if (0 == nRet)
-		{
-			if (++nRepeatForSel >= 10000)
-			{
-				LOGWARN0("Total time of selecting timeout is more than 5 minutes!");
-				return -1;
-			}
-		}
-	} while (nWriteTotal < nWriteSize);
-
-	return nWriteTotal;
+		sent += s;
+	}
+	return sent;
 }
-
-int SendData(int sock, unsigned char msg_type, const void *pData, unsigned int data_length)
+int SendData(int sock, unsigned char msg_type, const char*pData, int data_length)
 {
 	struct msg_head msgHead;
 	msgHead.version = MSG_NORMAL_VER;
 	msgHead.type = msg_type;
 	msgHead.length = htonl(data_length);
 	
-	int nSend = WriteSocketData(sock, &msgHead, sizeof(msgHead));
-	if ((nSend != -1) && (data_length > 0) && (pData != NULL))
-	{
-		nSend = WriteSocketData(sock, pData, data_length);
+	if (_send_all(sock, (const char*)&msgHead, sizeof(msgHead))!=sizeof(msgHead)) {
+		LOGERROR0("Failure sending content.");
+		return -1;
+	}
+	if (_send_all(sock, (const char*)pData, data_length)!=data_length) {
+		LOGERROR0("Failure sending content.");
 	}
 
-	return nSend;
+	return data_length;
 }
 
 int ReadSocketData(int sock, char *pBuffer, int nReadSize)
 {
-	int nRead = 0;
+	struct timeval timeout = { 3, 0 };
+	setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 	int nRecvTotal = 0;
-	int nRepeatForFD = 0;
-	int nRepeatForSel = 0;
-	fd_set fdread;
-	struct timeval tv;
 
-	do
-	{
-		FD_ZERO(&fdread);
-		FD_SET(sock, &fdread);
-		tv.tv_sec = 0;
-		tv.tv_usec = SELECT_TIMEOUT;
-		int nRet = select(sock + 1, &fdread, 0, 0, &tv);
-		if (nRet > 0)
-		{
-			if (FD_ISSET(sock, &fdread))
-			{
-				nRead = recv(sock, pBuffer +  nRecvTotal, nReadSize - nRecvTotal, 0);
-				if (-1 == nRead)
-				{
-					if (EAGAIN == errno)
-					{
-						LOGERROR0("Recv data with error EAGAIN");
-						return -1;
-						//continue;
-					}
-
-					return -1;
-				}
-				else if (0 == nRead)
-				{
-					return -1;
-				}
-				nRecvTotal += nRead;
-			}
-			else
-			{
-				if (++nRepeatForFD >= 10000)
-				{
-					LOGWARN0("Total time of FD_ISSET=0 is more than 5 minutes!");
-					return -1;
-				}
-			}
-		}
-		else if (-1 == nRet)
-		{
-			return -1;
-		}
-		else if (0 == nRet)
-		{
-			if (++nRepeatForSel >= 10000)
-			{
-				LOGWARN0("Total time of selecting timeout is more than 5 minutes!");
-				return -1;
-			}
-		}
+	do {
+		int nRead = recv(sock, pBuffer +  nRecvTotal, nReadSize - nRecvTotal, 0);
+		if (nRead < 0) break;
+		nRecvTotal += nRead;
 	} while (nRecvTotal < nReadSize);
 
 	return nRecvTotal;
@@ -216,36 +133,22 @@ int ReadSocketData(int sock, char *pBuffer, int nReadSize)
 
 int RecvData(int sock, struct msg_head *pMsgHead, char **pData)
 {
-	memset(pMsgHead, 0, sizeof(struct msg_head));
-	if (ReadSocketData(sock, (char*)pMsgHead, sizeof(struct msg_head)) < 0)
-	{
+	if (ReadSocketData(sock, (char*)pMsgHead, sizeof(struct msg_head)) != sizeof(struct msg_head)) {
 		LOGERROR0("Read socket head data failed!");
 		return -1;
 	}
 
-	if (pMsgHead->version != MSG_NORMAL_VER)
-	{
+	if (pMsgHead->version != MSG_NORMAL_VER) {
 		LOGERROR0("Message version error!");
 		return -1;
 	}
 
-	if ((pMsgHead->type != MSG_TYPE_REQ_GET_IPLIST)
-		&& (pMsgHead->type != MSG_TYPE_REQ_SET_IPLIST)
-		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW)
-		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW_STOP)
-		&& (pMsgHead->type != MSG_TYPE_REQ_FLOW))
-	{
-		LOGERROR0("Message type error!");
-		return -1;
-	}
-		
 	pMsgHead->length = ntohl(pMsgHead->length);
 	if (0 == pMsgHead->length)
 		return 0;
 
-	*pData = (char*)calloc(1, pMsgHead->length+1);
-	if (ReadSocketData(sock, *pData, pMsgHead->length) < 0)
-	{
+	*pData = (char*)malloc(pMsgHead->length+1);
+	if (ReadSocketData(sock, *pData, pMsgHead->length) != pMsgHead->length) {
 		LOGERROR0("Read socket body data failed!");
 		free(*pData);
 		return -1;
@@ -254,18 +157,26 @@ int RecvData(int sock, struct msg_head *pMsgHead, char **pData)
 	return pMsgHead->length;
 }
 
-
+int _install_socket_(int epoll, int sock, int flag)
+{
+	struct epoll_event ev = {0};
+	ev.events = flag;
+	ev.data.fd = sock;
+	return epoll_ctl(epoll, EPOLL_CTL_ADD, sock, &ev);
+}
+int _uninstall_socket_(int epoll, int sock)
+{
+	return epoll_ctl(epoll, EPOLL_CTL_DEL, sock, NULL);
+}
 int SetupTCPServer(int server_port)
 {
 	_srv_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (_srv_socket < 0)
-		return -1;
+	if (_srv_socket < 0) return -1;
 
 	int nerr = 0;
 	int sockopt = 1;
 	nerr = setsockopt(_srv_socket, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt));
-	if (nerr < 0)
-	{
+	if (nerr < 0) {
 		LOGERROR0("SO_REUSEADDR failed");
 		close(_srv_socket);
 		return -1;
@@ -279,24 +190,27 @@ int SetupTCPServer(int server_port)
 
 	LOGINFO("Bind server, port=%d", server_port);
 	nerr = bind(_srv_socket, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-	if (nerr < 0)
-	{
+	if (nerr < 0) {
 		LOGERROR0("bind failed");
 		close(_srv_socket);
 		return -1;
 	}
 
 	nerr = listen(_srv_socket, 5);
-	if (nerr < 0)
-	{
+	if (nerr < 0) {
 		LOGERROR0("listen failed");
 		close(_srv_socket);
 		return -1;
 	}
 	
+	_srv_epoll = epoll_create(SERV_CLIENT_COUNT);
+	ASSERT(_srv_epoll > -1);
+	if (_install_socket_(_srv_epoll, _srv_socket, EPOLLIN)==-1) {
+		perror("[ERROR] ");
+		ASSERT(0);
+	}
 	return _srv_socket;
 }
-
 int ProcessReqGetIpList()
 {
 	LOGINFO0("Receive request info for getting ip list.");
@@ -526,8 +440,7 @@ int ProcessReqSetIpList(const char *pRecvData)
 	
 	LOGINFO0("Send response OK for setting ip list request.");
 	nSend = SendData(_client_config_socket, MSG_TYPE_RES_OK, NULL, 0);
-	if (nSend < 0) 
-	{
+	if (nSend < 0) {
 		LOGWARN0("remote socket is error or close. recontinue.");
 		close(_client_config_socket);
 		_client_config_socket = -1;
@@ -541,19 +454,16 @@ void* server_thread(void* p)
 	char szPort[10] = {0};
 	GetValue(CONFIG_PATH, "server_port", szPort, 6);
 	int nPort = atoi(szPort);
-	if (nPort <= 0 || nPort > 65535)
-	{
+	if (nPort <= 0 || nPort > 65535) {
 		LOGERROR0("Get server port failed, set default port.");
 		nPort = SERVER_PORT;
 	}
 	
 thread_start:
-	if (SetupTCPServer(nPort) < 0)
-	{
+	if (SetupTCPServer(nPort) < 0) {
 		LOGERROR0("Setup TCP Server failed");
 		return NULL;
 	}
-	Unblock(_srv_socket);
 	
 	int nerr = 0;
 	fd_set rfds;
@@ -562,249 +472,159 @@ thread_start:
 	int retval = 0;
 	int max_socket = 0;
 	time_t active = time(NULL);
-	while (_runing) 
-	{
-while_start:
-	
-		FD_ZERO(&rfds);
-		FD_ZERO(&wfds);
-		tv.tv_sec = 0;
-		tv.tv_usec = SELECT_TIMEOUT;
-
-		FD_SET(_srv_socket, &rfds);
-		max_socket = _srv_socket;
-		if (_client_socket > 0)
-		{
-			FD_SET(_client_socket, &rfds);
-			if (_client_socket > max_socket) 
-				max_socket = _client_socket;
-		}
-		if (_client_config_socket > 0)
-		{
-			FD_SET(_client_config_socket, &rfds);
-			if (_client_config_socket > max_socket) 
-				max_socket = _client_config_socket;
-		}
-		
-		retval = select(max_socket+1, &rfds, 0, 0, &tv);
-		if (retval < 0)
-		{
-			LOGERROR("select error. [%d] %s", errno, strerror(errno));
-			close(_srv_socket);
-			if (_client_socket > 0)
-			{
-				close(_client_socket);
-				_client_socket = -1;
-			}
-			if (_client_config_socket > 0)
-			{
-				close(_client_config_socket);
-				_client_config_socket = -1;
-			}
-			goto thread_start;
+	struct epoll_event cli_event;
+	while (_runing) {
+		int clients = epoll_wait(_srv_epoll, &cli_event, 1, 5*1000);
+		if (clients == 0) continue;
+		if (clients < 0) {
+			LOGERROR0("epoll_wait return error.");
+			continue;
 		}
 
-		if (FD_ISSET(_srv_socket, &rfds))
+		if (cli_event.data.fd == _srv_socket)
 		{
 			int	accept_socket;
 			struct sockaddr_in client_address; 
 			socklen_t client_len;
 			client_len = sizeof(client_address);
-			LOGINFO0("Process accept...");
 			accept_socket = accept(_srv_socket, (struct sockaddr *)&client_address, &client_len);
-			if (accept_socket > 0)
-			{
+			if (accept_socket > 0) {
 				char sip[16] = {0};
 				int nPort = 0;
-				
-				Unblock(accept_socket);
 
 				inet_ntop(AF_INET, &client_address.sin_addr, sip, 16);
 				nPort = ntohs(client_address.sin_port);
 				
 				LOGINFO("%s:%d connect, accept successfully.", sip, nPort);
 
-				if (CLIENT_SOCKET_PORT == nPort)
-				{
-					if (_client_socket > 0)
-					{
-						LOGWARN0("A client has connected sensor, new connection will be closed.");
-						int nSend = SendData(accept_socket, MSG_TYPE_NOTIFY_CONNECTION_EXIST, _client_ip, strlen(_client_ip));
-						if (nSend < 0) 
-						{
-							LOGWARN0("remote socket is error or close. recontinue.");
-							close(accept_socket);
-						}
-						else
-						{
-							shutdown(accept_socket, SHUT_RDWR);
-							close(accept_socket);
-						}
-					}
-					else
-					{
+				if (CLIENT_SOCKET_PORT == nPort) {
+					if (_client_socket > 0) {
+						LOGWARN0("Another connector? close it.");
+						int nSend = SendData(accept_socket, MSG_TYPE_NOTIFY_CONNECTION_EXIST, 
+								_client_ip, strlen(_client_ip));
+						shutdown(accept_socket, SHUT_RDWR);
+						close(accept_socket);
+					} else {
 						_client_socket = accept_socket;
 						memset(_client_ip, 0, 16);
 						strcpy(_client_ip, sip);
+						_install_socket_(_srv_epoll, _client_socket, EPOLLIN|EPOLLERR);
 					}
-				}
-				else if (CLIENT_CONFIG_SOCKET_PORT == nPort)
-				{
-					if (_client_config_socket > 0)
-					{
-						LOGWARN0("A config client has connected sensor, new connection will be closed.");
-						int nSend = SendData(accept_socket, MSG_TYPE_NOTIFY_CONNECTION_EXIST, _client_config_ip, strlen(_client_config_ip));
-						if (nSend < 0) 
-						{
-							LOGWARN0("remote socket is error or close. recontinue.");
-							close(accept_socket);
-						}
-						else
-						{
-							shutdown(accept_socket, SHUT_RDWR);
-							close(accept_socket);
-						}
+				} else if (CLIENT_CONFIG_SOCKET_PORT == nPort) {
+					struct msg_head msgHead;
+					char *pRecvData = NULL;
+					int nRecv = RecvData(accept_socket, &msgHead, &pRecvData);
+					if (nRecv < 0) {
+						LOGWARN0("remote config socket is error or close. recontinue.");
+						close(accept_socket);
+					} else {
+						int nSend = 0;
+						if (MSG_TYPE_REQ_GET_IPLIST == msgHead.type) {
+							nSend = ProcessReqGetIpList();
+						} else if (MSG_TYPE_REQ_SET_IPLIST == msgHead.type) {
+							nSend = ProcessReqSetIpList(pRecvData);
+						} 
+
+						if (pRecvData != NULL) free(pRecvData);
 					}
-					else
-					{
-						_client_config_socket = accept_socket;
-						memset(_client_config_ip, 0, 16);
-						strcpy(_client_config_ip, sip);
-					}
-				}
-				else if (CLIENT_TEST_SOCKET_PORT == nPort)
-				{
+				} else if (CLIENT_TEST_SOCKET_PORT == nPort) {
+					shutdown(accept_socket, SHUT_RDWR);
+					close(accept_socket);
+				} else {
 					shutdown(accept_socket, SHUT_RDWR);
 					close(accept_socket);
 				}
-				else
-				{
-					shutdown(accept_socket, SHUT_RDWR);
-					close(accept_socket);
-				}
-			}
-			else
-				LOGERROR("accept error. [%d] %s", errno, strerror(errno));
-		}
-
-		if (_client_config_socket > 0)
-		{
-			if (FD_ISSET(_client_config_socket, &rfds))
-			{
-				struct msg_head msgHead;
-				char *pRecvData = NULL;
-				int nRecv = RecvData(_client_config_socket, &msgHead, &pRecvData);
-				if (nRecv < 0)
-				{
-					LOGWARN0("remote config socket is error or close. recontinue.");
-					close(_client_config_socket);
-					_client_config_socket = -1;
-				}
-				else
-				{
-					int nSend = 0;
-					if (MSG_TYPE_REQ_GET_IPLIST == msgHead.type)
-					{
-						nSend = ProcessReqGetIpList();
-					}
-					else if (MSG_TYPE_REQ_SET_IPLIST == msgHead.type)
-					{
-						nSend = ProcessReqSetIpList(pRecvData);
-					}
-
-					if (pRecvData != NULL)
-						free(pRecvData);
-				}
+			} else {
+				LOGERROR("accept error. [%d]", errno);
 			}
 		}
 
-		if (_client_socket > 0)
-		{
-			if (FD_ISSET(_client_socket, &rfds))
-			{
-				struct msg_head msgHead;
-				char *pRecvData = NULL;
-				int nRecv = RecvData(_client_socket, &msgHead, &pRecvData);
-				if (nRecv < 0)
-				{
-					LOGWARN0("remote client socket is error or close. recontinue.");
-					close(_client_socket);
-					_client_socket = -1;
-				}
-				else
-				{
-					if (MSG_TYPE_REQ_FLOW == msgHead.type)
-					{
-						if (0 == _flow_socket_start_time)
-							_flow_socket_start_time = time(NULL);
-					}
-					else if (MSG_TYPE_REQ_FLOW_STOP == msgHead.type)
-					{
-					}
-
-					if (pRecvData != NULL)
-						free(pRecvData);
-				}
-			}
-
-			// TODO: begin test
-			if (DEBUG) {
-				char* data;
-				size_t datalen;
-				if ((datalen = GetHttpData(&data)) > 0) {
-					free((void*)data);
-				}
-			}
-			// TODO: end test
-			if (_client_socket > 0)
-			{
-				char *data = NULL;
-				size_t datalen = 0;
-				int nSend = 0;
-				g_nFlagGetData = 0;
-				if ((datalen = GetHttpData(&data)) > 0) 
-				{
-					g_nFlagGetData = 1;
-					g_nFlagSendData = 0;
-					LOGINFO("send http_info[%d] %s", datalen, data);
-					nSend = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
-					nSend = 100;
-					free((void*)data);
-					g_nFlagSendData = 1;
-					if (nSend < 0) 
-					{
-						LOGWARN0("remote client socket is error or close. recontinue.");
-						close(_client_socket);
-						_client_socket = -1;
-						goto while_start;
-					}
-					active = time(NULL);
-				}
-				g_nFlagGetData = 1;
-				
-				if (time(NULL) - active > 10) 
-				{
-					active = time(NULL);
-					nSend = SendData(_client_socket, MSG_TYPE_HEARTHIT, NULL, 0);
-					if (nSend < 0) {
-						LOGWARN0("remote client socket is error or close. recontinue.");
-						close(_client_socket);
-						_client_socket = -1;
-						goto while_start;
-					}
-				}
-			}
+		if (cli_event.data.fd == _client_socket) { // TODO: something are wroning.
+			struct msg_head msgHead;
+			char *pRecvData = NULL;
+			int nRecv = RecvData(_client_socket, &msgHead, &pRecvData);
+			if (nRecv < 0) {
+				LOGWARN0("remote client socket is error or close. recontinue.");
+				close(_client_socket);
+				_client_socket = -1;
+			} 
+			if (pRecvData != NULL) free(pRecvData);
 		}
 	}
 
-	if (_client_socket > 0)
-	{
+	if (_client_socket > 0) {
 		shutdown(_client_socket, SHUT_RDWR);
 		close(_client_socket);
 	}
 	
 	shutdown(_srv_socket, SHUT_RDWR);
 	close(_srv_socket);
+	return NULL;
+}
+
+int _get_data_from_db(char** data)
+{
+	// TODO: process db
+	return 0;
+}
+int _save_data_to_db(char* data, int len)
+{
+	// TODO: 
+	return len;
+}
+void* client_thread(void *p)
+{		// TODO: send data
+	time_t active = time(NULL);
+	const int timeout = 60;
+	int datalen = 0;
+	int fromdb = 0;
+	char* data = NULL;
+	while (_runing) {
+		if ((time(NULL)-active) > timeout && _client_socket>0) {
+			int sent = SendData(_client_socket, MSG_TYPE_HEARTHIT, NULL, 0);
+			if (sent != 0) {
+				_uninstall_socket_(_srv_epoll, _client_socket);
+				shutdown(_client_socket, SHUT_RDWR);
+				close(_client_socket);
+				_client_socket = 0;
+				continue;
+			} else {
+				active = time(NULL);
+			}
+		}
+		if (data == NULL) {
+			fromdb = 0;
+			datalen = GetHttpData(&data);
+			if (datalen == 0) {
+				datalen = _get_data_from_db(&data);
+				fromdb = 1;
+			}
+			if (datalen == 0) {
+				sleep(1);
+				continue;
+			}
+		}
+		if (_client_socket == 0) {
+			if (!fromdb) {
+				_save_data_to_db(data, datalen);
+				data = NULL;
+			}
+			continue;
+		}
+		int sent = SendData(_client_socket, MSG_TYPE_HTTP, data, datalen);
+		if (sent != datalen) {
+			LOGWARN("Failure sending http. %d/%d", sent, datalen);
+			_uninstall_socket_(_srv_epoll, _client_socket);
+			shutdown(_client_socket, SHUT_RDWR);
+			close(_client_socket);
+			_client_socket = 0;
+			continue;
+		}
+		free(data);
+		data = NULL;
+		INC_SENT_HTTP;
+		active = time(NULL);
+	}
 	return NULL;
 }
 
@@ -815,6 +635,8 @@ int StartServer()
 	_msg_heart_hit.length = htonl(0);
 
 	int nerr = pthread_create(&_srv_thread, NULL, server_thread, NULL);
+	if (nerr < 0) return nerr;
+	nerr = pthread_create(&_cli_thread, NULL, client_thread, NULL);
 	return nerr;
 }
 
@@ -823,5 +645,6 @@ void StopServer()
 	_runing = 0;
 	void* result;
 	pthread_join(_srv_thread, &result);
+	pthread_join(_cli_thread, &result);
 }
 

@@ -242,6 +242,7 @@ struct _queue_fixed
 	unsigned head;
 	unsigned tail;
 	pthread_mutex_t lock;
+	pthread_cond_t  cond;
 	const void* points[0];
 };
 
@@ -252,6 +253,7 @@ struct queue_t* init_queue(size_t size)
 	if (queue == NULL) return NULL;
 	
 	pthread_mutex_init(&queue->lock, NULL);
+	pthread_cond_init(&queue->cond, NULL);
 	queue->size = 0;
 	queue->max_size = size;
 	queue->head = queue->tail = 0;
@@ -270,6 +272,7 @@ int push_queue(struct queue_t* queue, const void* p)
 		pthread_mutex_lock(&_queue->lock);
 		++_queue->size;
 		pthread_mutex_unlock(&_queue->lock);
+		pthread_cond_broadcast(&_queue->cond);
 	}
 	return _head;
 }
@@ -297,6 +300,26 @@ void* pop_queue(struct queue_t* queue)
 		pthread_mutex_lock(&_queue->lock);
 		--_queue->size;
 		pthread_mutex_unlock(&_queue->lock);
+	}
+	return p;
+}
+void* pop_queue_wait(struct queue_t* queue)
+{
+	struct _queue_fixed* _queue = (struct _queue_fixed*)queue;
+
+	void *p = NULL;
+GETTHINGS:
+	if (_queue->size > 0) {
+		p = (void*)_queue->points[_queue->tail++];
+		if (_queue->tail == _queue->max_size) _queue->tail = 0;
+		pthread_mutex_lock(&_queue->lock);
+		--_queue->size;
+		pthread_mutex_unlock(&_queue->lock);
+	} else {
+		pthread_mutex_lock(&_queue->lock);
+		pthread_cond_wait(&_queue->cond, &_queue->lock);
+		pthread_mutex_unlock(&_queue->lock);
+		goto GETTHINGS;
 	}
 	return p;
 }

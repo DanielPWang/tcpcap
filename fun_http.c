@@ -873,11 +873,8 @@ int AppendReponse(const char* packet, int bIsCurPack)
 void *HTTP_Thread(void* param)
 {
 	while (_http_living) {
-		const char* packet = pop_queue(_packets);
-		if (packet == NULL) {
-			sleep(0);
-			continue;
-		}
+		const char* packet = pop_queue_wait(_packets);
+		if (packet == NULL) { continue; }
 		INC_POP_PACKETS;
 
 		struct timeval *tv = (struct timeval*)packet;
@@ -1230,7 +1227,7 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 int GetHttpData(char **data)
 {
 	*data = NULL;
-	struct tcp_session *pSession = (struct tcp_session*)pop_queue(_whole_content);
+	struct tcp_session *pSession = (struct tcp_session*)pop_queue_wait(_whole_content);
 	if (pSession == NULL) 
 		return 0;
 	

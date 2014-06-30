@@ -20,6 +20,7 @@ extern int DEBUG;
 // capture
 #define RECV_BUFFER_LEN   4000 // 8192
 
+#define MAX_BLOCK_ITEM 500
 // HTTP
 #define MAX_HTTP_SESSIONS 6000
 #define MAX_HTTP_PACKETS  20000
