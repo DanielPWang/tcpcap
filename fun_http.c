@@ -62,6 +62,8 @@ static int g_nSendErrStateDataFlag = 1;
 static struct tcp_session* _http_session = NULL;	// a session = query + reponse
 static struct queue_t *_idl_session = NULL;			// all idl session
 static struct queue_t *_whole_content = NULL;		// http_session.flag = HTTP_SESSION_FINISH
+pthread_rwlock_t _working_session_lock = {0};
+static struct queue_t *_working_session = NULL;
 
 extern volatile int g_nFlagGetData;
 extern volatile int g_nFlagSendData;
@@ -171,15 +173,13 @@ int NewHttpSession(const char* packet)
 	char tmp = *enter;
 	*enter = '\0';
 	const char* cmdline = content;
-	LOGTRACE0(cmdline);
+	LOGTRACE("New http-session: %s", cmdline);
 	*enter = tmp;
 	
 	for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
 		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;
 	}
-	
-	// find IDL session
-	struct tcp_session* pIDL = NULL;
+
 	int index = 0;
 	for (; index < g_nMaxHttpSessionCount; ++index)		// todo: MAX_HTTP_SESSION
 	{
@@ -192,18 +192,21 @@ int NewHttpSession(const char* packet)
 				&& pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest
 				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq)  // TODO: why? add by jr
 			{ // client -> server be reuse.
-				LOGWARN("session[%d] channel is reused. flag=%d res1=%d res2=%d g_nReusedCount=%d", index, pREQ->flag, pREQ->res1, pREQ->res2, ++g_nReusedCount);
-				CleanHttpSession(pREQ);
+				LOGWARN("session[%d] channel is reused. flag=%d res1=%d res2=%d g_nReusedCount=%d", 
+						index, pREQ->flag, pREQ->res1, pREQ->res2, ++g_nReusedCount);
+				pREQ->flag = HTTP_SESSION_REUSED;
+				push_queue(_whole_content, pREQ);
+				// CleanHttpSession(pREQ);
 				break;
 			} 
 			else if (tv->tv_sec - pREQ->update.tv_sec > g_nHttpTimeout)	// TODO: HTTP_TIME_OUT
 			{
-				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
-				CleanHttpSession(pREQ);
+				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", 
+						tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
+				pREQ->flag = HTTP_SESSION_TIMEOUT;
+				push_queue(_whole_content, pREQ);
 				break;
-			} 
-			else 
-			{
+			} else {
 				continue;
 			}
 		}
@@ -212,10 +215,14 @@ int NewHttpSession(const char* packet)
 			break;
 		}
 	}
-
+	struct tcp_session* pIDL = NULL;
+LOOP_DEBUG:
 	pIDL = (struct tcp_session*)pop_queue(_idl_session);
-	if (pIDL == NULL) 
-		return -2;
+	if (DEBUG && pIDL==NULL) {
+		sleep(1);
+		goto LOOP_DEBUG;
+	}
+	if (pIDL == NULL) return -2;
 
 	pIDL->flag = HTTP_SESSION_REQUESTING;
 	pIDL->client.ip.s_addr = iphead->saddr;
@@ -223,7 +230,6 @@ int NewHttpSession(const char* packet)
 	pIDL->client.port = tcphead->source;
 	pIDL->server.port = tcphead->dest;
 	pIDL->create = *tv;
-	// pIDL->update = tv->tv_sec;
 	pIDL->update = *tv;
 	pIDL->seq = tcphead->seq;
 	pIDL->ack = tcphead->ack_seq;
@@ -241,18 +247,20 @@ int NewHttpSession(const char* packet)
 	pIDL->response_head_len = 0;
 	pIDL->request_head_len_valid_flag = 0;
 	*(const char**)packet = NULL;
-	if (*(unsigned*)content==_get_image && content[contentlen-4]=='\r'
-			&& content[contentlen-3]=='\n' && content[contentlen-2]=='\r'
-			&& content[contentlen-1]=='\n') 
-	{
+	if ((*(unsigned*)content==_get_image)
+			&& content[contentlen-4]=='\r' && content[contentlen-3]=='\n'
+			&& content[contentlen-2]=='\r' && content[contentlen-1]=='\n') {
+		pIDL->flag = HTTP_SESSION_REQUEST;
+	}
+	if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug
 		pIDL->flag = HTTP_SESSION_REQUEST;
 	}
 
 	pIDL->request_head = (char*)calloc(1, contentlen+1);
-	memcpy(pIDL->request_head, content, contentlen);
+	memcpy(pIDL->request_head, content, contentlen);	// TODO: why?
 	pIDL->request_head_len = contentlen+1;
-		
-	LOGDEBUG("Session[%d]Start request in NewHttpSession, content= %s", pIDL->index, content);
+
+	LOGTRACE("Session[%d]Start request in NewHttpSession, content= %s", pIDL->index, content);
 	
 	return index;
 }
@@ -271,17 +279,15 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	// Check seq and ack. not fix.
 	if (pSession->seq != tcphead->ack_seq || (pSession->ack+pSession->res0) != tcphead->seq)
 	{ 
-		if (pSession->ack == tcphead->seq && (pSession->seq + pSession->res0) == tcphead->ack_seq)  // it's not woring on first time.
-		{
+		if (pSession->ack == tcphead->seq && (pSession->seq + pSession->res0) == tcphead->ack_seq)  
+		{// it's not woring on first time.
 			LOGDEBUG("S->C packet for first response. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
 					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);	// TODO: setupid. why?
-			if (pszCode == NULL)
-				pszCode = memmem(content, contentlen, "HTTP/1.0 100", 12);
+			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);	
+			if (pszCode == NULL) pszCode = memmem(content, contentlen, "HTTP/1.0 100", 12);
 
-			if (pszCode != NULL)
-			{
-				LOGWARN("Drop this packet for state 100 continue. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
+			if (pszCode != NULL) {
+				LOGERROR("HTTP/1.x 100 - Droped. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
 							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
 
 				pSession->flag = HTTP_SESSION_RESPONSEING;
@@ -374,8 +380,8 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 	pSession->lastdata = (void*)pPacket;
 
 	// reponse length
-	if ((*(unsigned*)content == _http_image)
-		|| ((pSession->res1 == 0)
+	if ((*(unsigned*)content == _http_image) || 
+			((pSession->res1 == 0)
 			&& (HTTP_TRANSFER_INIT == pSession->transfer_flag) 
 			&& (NULL == pSession->response_head) ))     // TODO: bug. Content-Length被分到两个包中
 	{
@@ -383,19 +389,14 @@ int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
 		memcpy(pSession->response_head, content, contentlen);
 		pSession->response_head_len = contentlen+1;
 		pSession->response_head_gen_time++;
-		if (memmem(content, contentlen, "\r\n\r\n", 4) != NULL)
-		{
+		if (memmem(content, contentlen, "\r\n\r\n", 4) != NULL) {
 			pSession->response_head_recv_flag = 1;
 			content = pSession->response_head;	
-		}
-		else
-		{
+		} else {
 			LOGDEBUG("Session[%d] response head is not enough, continue to generate. content= %s",
 				nIndex, content);
 		}
-	} 
-	else 
-	{
+	} else {
 		if ((HTTP_TRANSFER_INIT == pSession->transfer_flag) && (NULL != pSession->response_head))
 		{
 			LOGDEBUG("Session[%d] the next response contentlen=%d, content= %s",
@@ -816,14 +817,6 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		if (pREQ->flag == HTTP_SESSION_IDL || pREQ->flag == HTTP_SESSION_FINISH) 
 			continue;
 
-		// process timeout
-		if (tv->tv_sec-pREQ->update.tv_sec > g_nHttpTimeout) // TODO: HTTP_TIMEOUT
-		{
-			LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
-			CleanHttpSession(pREQ);
-			continue;
-		}
-
 		int nRs = 0;
 		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
 			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) // server -> client
@@ -873,7 +866,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 void *HTTP_Thread(void* param)
 {
 	while (_http_living) {
-		const char* packet = pop_queue_wait(_packets);
+		const char* packet = pop_queue_timedwait(_packets);
 		if (packet == NULL) { continue; }
 		INC_POP_PACKETS;
 
@@ -893,36 +886,25 @@ void *HTTP_Thread(void* param)
 		tcphead->ack_seq = ntohl(tcphead->ack_seq);
 
 		unsigned *cmd = (unsigned*)content;
-		if (*cmd == _get_image || *cmd == _post_image) 
-		{
-			int nRes = 0;
-			if ((nRes = NewHttpSession(packet)) < 0) 
-			{
-				if (nRes == -3) 
-				{
+		if (*cmd == _get_image || *cmd == _post_image) {	// TODO: bug
+			// TODO: need to process RST and FIN
+			int nRes = NewHttpSession(packet);
+			if ( nRes < 0) {
+				if (nRes == -3) {
 					LOGDEBUG("Content is not html data. drop count = %d", ++g_nDropCountForImage);
-				}
-				else if (nRes == -1) 
-				{
+				} else if (nRes == -1) {
 					LOGWARN0("Content is error! Do not insert into session.");
-				} 
-				else if (nRes == -2) 
-				{
+				} else if (nRes == -2) {
 					char *enter = strchr(content, '\r');
-					if (enter != NULL) 
-					{
+					if (enter != NULL) {
 						*enter = '\0';
-						LOGWARN("_http_session is full. drop count = %d, drop content = %s", ++g_nDropCountForSessionFull, content);
+						LOGWARN("_http_session is full. drop count = %d, drop content = %s", 
+								++g_nDropCountForSessionFull, content);
 						*enter = '\r';
-
-						LOGINFO("g_nFlagGetData = %d", g_nFlagGetData);
-						LOGINFO("g_nFlagSendData = %d", g_nFlagSendData);
 					}
 				}
 				free((void*)packet);
 			}
-
-			//LOGWARN("g_nDropCountForSessionFull  = %d, g_nDropCountForPacketFull = %d", g_nDropCountForSessionFull, g_nDropCountForPacketFull);
 			continue;
 		}
 
@@ -991,6 +973,10 @@ int HttpInit()
 	ASSERT(_whole_content != NULL);
 	_idl_session = init_queue(g_nMaxHttpSessionCount);
 	ASSERT(_idl_session != NULL);
+	_working_session = init_queue(g_nMaxHttpSessionCount);
+	ASSERT(_working_session != NULL);
+	int err = pthread_rwlock_init(&_working_session_lock, NULL);
+	ASSERT(err == 0);
 	//_use_session = init_queue(g_nMaxHttpSessionCount);
 	//ASSERT(_use_session != NULL);
 
@@ -1046,8 +1032,9 @@ DEBUG_LOOP:
 		if (DEBUG) {
 			sleep(1);
 			goto DEBUG_LOOP;
+		} else {
+			LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
 		}
-		LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
 	}
 
 	return err;
@@ -1227,9 +1214,11 @@ int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 int GetHttpData(char **data)
 {
 	*data = NULL;
-	struct tcp_session *pSession = (struct tcp_session*)pop_queue_wait(_whole_content);
-	if (pSession == NULL) 
-		return 0;
+	if (_whole_content == NULL) return 0;
+	struct tcp_session *pSession = (struct tcp_session*)pop_queue(_whole_content);
+	if (pSession == NULL) return 0;
+	
+	INC_WHOLE_HTML_SESSION;
 	
 	size_t http_len = 0;
 	ASSERT(pSession->flag == HTTP_SESSION_FINISH);
@@ -1546,7 +1535,7 @@ int GetHttpData(char **data)
 		
 		if (nContentLength == 0) 
 		{
-			LOGWARN("Session[%d] has not content-Length or is 0, current content = %s", pSession->index, HTTP);
+			// LOGWARN("Session[%d] has not content-Length or is 0, current content = %s", pSession->index, HTTP);
 			goto NOZIP;
 		}
 		

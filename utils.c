@@ -303,8 +303,9 @@ void* pop_queue(struct queue_t* queue)
 	}
 	return p;
 }
-void* pop_queue_wait(struct queue_t* queue)
+void* pop_queue_timedwait(struct queue_t* queue)
 {
+	static struct timespec timeout = { 5, 0 };
 	struct _queue_fixed* _queue = (struct _queue_fixed*)queue;
 
 	void *p = NULL;
@@ -317,9 +318,13 @@ GETTHINGS:
 		pthread_mutex_unlock(&_queue->lock);
 	} else {
 		pthread_mutex_lock(&_queue->lock);
-		pthread_cond_wait(&_queue->cond, &_queue->lock);
+		int err = pthread_cond_timedwait(&_queue->cond, &_queue->lock, &timeout);
 		pthread_mutex_unlock(&_queue->lock);
-		goto GETTHINGS;
+		if (err == ETIMEDOUT) {
+			p = NULL;
+		} else {
+			goto GETTHINGS;
+		}
 	}
 	return p;
 }

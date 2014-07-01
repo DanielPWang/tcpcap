@@ -52,11 +52,6 @@ static int SendData(int sock, unsigned char msg_type, const char*pData, int data
 static int ProcessReqGetIpList();
 static int ProcessReqSetIpList(const char *pRecvData);
 
-volatile int g_nFlagGetData = 0;
-volatile int g_nFlagSendData = 0;
-
-// TODO: review this file.
-//
 int InitServer()
 {
 	return 1;
@@ -106,7 +101,7 @@ int SendData(int sock, unsigned char msg_type, const char*pData, int data_length
 	msgHead.length = htonl(data_length);
 	
 	if (_send_all(sock, (const char*)&msgHead, sizeof(msgHead))!=sizeof(msgHead)) {
-		LOGERROR0("Failure sending content.");
+		LOGERROR0("Failure sending msghead.");
 		return -1;
 	}
 	if (_send_all(sock, (const char*)pData, data_length)!=data_length) {
@@ -604,7 +599,7 @@ void* client_thread(void *p)
 				continue;
 			}
 		}
-		if (_client_socket == 0) {
+		if (_client_socket == -1) {
 			if (!fromdb) {
 				_save_data_to_db(data, datalen);
 				data = NULL;
@@ -617,7 +612,7 @@ void* client_thread(void *p)
 			_uninstall_socket_(_srv_epoll, _client_socket);
 			shutdown(_client_socket, SHUT_RDWR);
 			close(_client_socket);
-			_client_socket = 0;
+			_client_socket = -1;
 			continue;
 		}
 		free(data);
