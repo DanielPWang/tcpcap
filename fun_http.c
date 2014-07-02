@@ -25,18 +25,12 @@
 #include "fun_http.h"
 #include "statis.h"
 
-pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // TODO: mutil thread to process http
 static pthread_t _http_thread_id[HTTP_PROCESS_THREADS];
 
 static void* _valid_hosts = NULL;
-//static char**  _monitor_uris = NULL;
-//static size_t _monitor_uris_count = 0;
-
-//static char**  _ignore_request = NULL;
-//static size_t _ignore_request_count = 0;
-
+pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct queue_t *_packets = NULL;
 
 static int g_nCountWholeContentFull = 0;
@@ -87,7 +81,7 @@ struct tcp_session* GetHttpSession(const struct iphdr* iphead, const struct tcph
 {
 	return NULL;
 }
-
+///////////////////////////////////////////////////////////////
 struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 {
 	LOGDEBUG("Session[%d] start clean!", pSession->index);
@@ -161,17 +155,19 @@ int NewHttpSession(const char* packet)
 	struct tcphdr *tcphead=TCPHDR(iphead);
 	unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	char *content = (void*)tcphead + tcphead->doff*4;
-	char* enter = strchr(content, '\r');
-	if (enter == NULL) {
-		enter = strchr(content, '\n');
-		if (enter == NULL) return -1;
-	}
-	
-	char tmp = *enter;
-	*enter = '\0';
 	const char* cmdline = content;
-	LOGTRACE("New http-session: %s", cmdline);
-	*enter = tmp;
+	if (loglevel() <= LOG_TRACE) {
+		char* enter = strchr(content, '\r');
+		if (enter == NULL) {
+			enter = strchr(content, '\n');
+			if (enter == NULL) return -1;
+		}
+		
+		char tmp = *enter;
+		*enter = '\0';
+		LOGTRACE("New http-session: %s", cmdline);
+		*enter = tmp;
+	}
 	
 	for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
 		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;
@@ -1193,6 +1189,11 @@ int GetHttpData(char **data)
 	
 	INC_WHOLE_HTML_SESSION;
 	
+	if (pSession->flag != HTTP_SESSION_FINISH) {
+		LOGFATAL("Session.flag=%d. want HTTP_SESSION_FINISH", pSession->flag);
+		CleanHttpSession(pSession);
+		return 0;
+	}
 	size_t http_len = 0;
 	ASSERT(pSession->flag == HTTP_SESSION_FINISH);
 	assert(pSession->data != NULL);

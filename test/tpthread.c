@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <atomic_ops.h>
+#include "fall.h"
 
 pthread_mutex_t mtx_ = PTHREAD_MUTEX_INITIALIZER;
 
@@ -18,7 +19,8 @@ int main(int argc, char* argv[])
 	a = b =c =d =e =f =g =h =i =j;
 	int array[10] = {0};
 	AO_t A = AO_TS_INITIALIZER;
-	for (; count < 0xFFFFFFFF; ++count) {
+	//for (; count < 0xFFFFFFFF; ++count) {
+	for (; count < 0; ++count) {
 		AO_fetch_and_add1(&A);
 		// sum += 1;
 		//pthread_mutex_lock(&mtx_);
@@ -28,6 +30,6 @@ int main(int argc, char* argv[])
 	}
 	gettimeofday(&end, NULL);
 	int total = a+ b+ c+ d+ e+ f+ g+ h+ i+ j;
-	printf("%u\n", A);
+	printf("%u %u\n", A, sizeof(struct http_sessions_t)*65535);
 	return 0;
 }

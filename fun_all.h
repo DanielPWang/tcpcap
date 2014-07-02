@@ -1,6 +1,7 @@
 #ifndef __FUN_ALL_H__
 #define __FUN_ALL_H__
 
+#include <stdint.h>
 #include <sys/socket.h>
 #include <netinet/ip.h>
 #include <netinet/in.h>
@@ -13,6 +14,12 @@ struct hosts_t
 	in_port_t port;
 } __attribute__((packed));
 
+struct line_t {
+	char* begin;
+	char* end;
+};
+
+// it should be http_session
 struct tcp_session
 {
 	struct hosts_t client;		// assume
@@ -40,6 +47,11 @@ struct tcp_session
 	unsigned part_content_len;
 	struct timeval create;	// first
 	struct timeval update;		// the lasttime update. TODO: time_t
+	struct line_t query_url;
+	struct line_t response_http;
+	struct line_t response_content_type;
+	struct line_t response_content_length;
+	struct line_t response_trans_encoding;
 	void *data;
 	void *lastdata;
 	void *pack_later;
@@ -48,8 +60,15 @@ struct tcp_session
 	char *response_head;
 	char *cur_content;
 	char *part_content;
+	void *prev;
+	void *next;
 };
 
+struct http_sessions_t{
+	struct tcp_session* head;
+	pthread_mutex_t lock;
+	uint32_t	used;
+};
 /** @brief tans "10.10.100.10:9900" to host_t 
  *	returns nonzero if the address is valid
  **/

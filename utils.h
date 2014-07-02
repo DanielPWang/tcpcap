@@ -70,7 +70,8 @@ void print_bt();
 
 #define ASSERT(x) do{ \
 	if (!(x)) { \
-		logmsg(LOG_FATAL, "[%s:%d] " #x); \
+		logmsg(LOG_FATAL, "[%s:%d] " #x, __FILE__, __LINE__); \
+		print_bt(); \
 		abort(); \
 	} \
 }while(0);
