@@ -1007,7 +1007,7 @@ DEBUG_LOOP:
 	err = push_queue(_packets, (const void*) buffer);
 	if (err < 0) {
 		if (DEBUG) {
-			sleep(1);
+			sleep(0);
 			goto DEBUG_LOOP;
 		} else {
 			LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
@@ -1046,11 +1046,8 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 		sip.s_addr = iphead->saddr;
 		dip.s_addr = iphead->daddr;
 		char ssip[16], sdip[16];
-		LOGTRACE("%s => %s is skiped.", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
-	} else {
-		nRs = PushHttpPack(buffer, iphead, tcphead);
+		LOGINFO("%s => %s is skiped.", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
 	}
-
 	pthread_mutex_unlock(&_host_ip_lock);
 	return nRs;
 }
@@ -1072,7 +1069,7 @@ int LoadHttpConf(const char* filename)
 	nDataLen = GetFileData(HTTP_HOST_PATH_FILE, httphosts, VALUE_LENGTH_MAX);
 	// TODO:
 	_valid_hosts = LoadHost(httphosts);
-	ASSERT( _valid_hosts == NULL );
+	ASSERT( _valid_hosts != NULL );
 
 	free(pFileData);
 	return 0;
