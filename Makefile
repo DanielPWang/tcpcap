@@ -3,7 +3,7 @@ OUTDIR = build/
 CC = gcc
 
 ifdef RELEASE
-	CFLAGS = -Wall -O1
+	CFLAGS = -Wall -O1 -pg
 else
 	CFLAGS = -ggdb -O0 -pg
 endif

@@ -13,7 +13,9 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <zlib.h>
+#include <sched.h>
 
 #include "config.h"
 #include "iface.h"
@@ -986,10 +988,16 @@ int HttpInit()
 		push_queue(_idl_session, &_http_session[index]);
 	}
 
+	pthread_attr_t pattr;
+	struct sched_param par = { sched_get_priority_max(SCHED_FIFO) };
+	ASSERT(pthread_attr_init(&pattr) == 0);
+	ASSERT(pthread_attr_setschedpolicy(&pattr, SCHED_FIFO) == 0);
+	ASSERT(pthread_attr_setschedparam(&pattr, &par) == 0);
 	for (int n=0; n<HTTP_PROCESS_THREADS; ++n) {
-		int err = pthread_create(&_http_thread_id[n], NULL, &HTTP_Thread, (void*)&_http_living);
+		int err = pthread_create(&_http_thread_id[n], &pattr, &HTTP_Thread, (void*)&_http_living);
 		ASSERT(err >= 0);
 	}
+	pthread_attr_destroy(&pattr);
 
 	return _packets==NULL? -1:0;
 }
@@ -1035,6 +1043,8 @@ DEBUG_LOOP:
 		} else {
 			LOGWARN("http_queue is full. drop the packets, drop count = %d", ++g_nDropCountForPacketFull);
 		}
+	} else {
+		INC_PUSH_PACKETS;
 	}
 
 	return err;

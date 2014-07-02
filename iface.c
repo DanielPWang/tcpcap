@@ -127,6 +127,7 @@ int OpenMonitorDevs()
 
 int GetPacket_Debug(char* buffer, size_t size)
 {
+	static uint32_t usecs = 
 	sleep(0);
 	struct pcap_pkthdr *h;
 	const u_char* data;
