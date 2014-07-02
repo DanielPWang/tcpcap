@@ -68,7 +68,7 @@ void *inHosts(const void *hosts, const struct hosts_t *host)
 }
 
 // Load rule from config.
-void* LoadHost(const char* hostsbuff)
+void* LoadHost(char* hostsbuff)
 {
 	ASSERT(hostsbuff != NULL);
 	// capture these hosts

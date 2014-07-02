@@ -11,7 +11,10 @@ enum HTTP_SESSION_FLAGS {
 	HTTP_SESSION_REQUEST, 
 	HTTP_SESSION_REPONSE, 
 	HTTP_SESSION_RESPONSEING,
-	HTTP_SESSION_FINISH
+	HTTP_SESSION_FINISH,
+	HTTP_SESSION_REUSED,
+	HTTP_SESSION_BROKEN,
+	HTTP_SESSION_TIMEOUT
 };
 
 enum HTTP_TRANSFER_FLAGS { 
@@ -67,6 +70,7 @@ enum HTTP_SPECIAL_STATE {
 
 // int isHTTP(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int HttpInit();
+int HttpStop();
 int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);

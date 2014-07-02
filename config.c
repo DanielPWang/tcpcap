@@ -57,10 +57,8 @@ int GetFileData(const char* pszFileName, char* pszFileData, int nMaxLen)
 	
 	FILE *pFile = NULL;
 	pFile = fopen(pszFileName, "r");
-	if (pFile != NULL) 
-	{
-		while (!feof(pFile))
-		{
+	if (pFile != NULL) {
+		while (!feof(pFile)) {
 			if (nReadTotal+BUFFER_MAX_LEN > nMaxLen)
 				nReadBufferLen = nMaxLen - nReadTotal;
 			
@@ -73,6 +71,9 @@ int GetFileData(const char* pszFileName, char* pszFileData, int nMaxLen)
 
 		pszFileData[nReadTotal] = '\0';
 		fclose(pFile);
+	} else {
+		LOGFATAL("'%s' dont exist.", pszFileName);
+		ASSERT(0);
 	}
 
 	return nReadTotal;

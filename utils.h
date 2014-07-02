@@ -81,6 +81,7 @@ struct queue_t;
 struct queue_t* init_queue(size_t size);
 int push_queue(struct queue_t* queue, const void* p);	///< success return > -1;
 void* pop_queue(struct queue_t* queue);
+void* pop_queue_timedwait(struct queue_t* queue);
 size_t len_queue(struct queue_t* queue);
 void* get_queue(struct queue_t* queue, size_t index);
 void destory_queue(struct queue_t* queue);

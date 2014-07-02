@@ -186,11 +186,11 @@ int logmsg(int level, const char* fmt, ... )
 	va_start(ap, fmt);
 
 	fprintf(_logfd, "%s %s: ", timebuf, _LOG_LEVEL[level]);
-	//fprintf(stdout, "%s %s: ", timebuf, _LOG_LEVEL[level]);
+	if (level>2) fprintf(stdout, "%s %s: ", timebuf, _LOG_LEVEL[level]);
 	int nRet = vfprintf(_logfd, fmt, ap);
-	//vfprintf(stdout, fmt, ap);
+	if (level>2) vfprintf(stdout, fmt, ap);
 	fprintf(_logfd, "\n");
-	//fprintf(stdout, "\n");
+	if (level>2) fprintf(stdout, "\n");
 
 	va_end(ap);
 
@@ -242,6 +242,7 @@ struct _queue_fixed
 	unsigned head;
 	unsigned tail;
 	pthread_mutex_t lock;
+	pthread_cond_t  cond;
 	const void* points[0];
 };
 
@@ -252,6 +253,7 @@ struct queue_t* init_queue(size_t size)
 	if (queue == NULL) return NULL;
 	
 	pthread_mutex_init(&queue->lock, NULL);
+	pthread_cond_init(&queue->cond, NULL);
 	queue->size = 0;
 	queue->max_size = size;
 	queue->head = queue->tail = 0;
@@ -263,14 +265,15 @@ int push_queue(struct queue_t* queue, const void* p)
 	struct _queue_fixed* _queue = (struct _queue_fixed*)queue;
 	int _head = -1;
 	
-	pthread_mutex_lock(&_queue->lock);
 	if (_queue->size < _queue->max_size) {
 		_head = _queue->head++;
 		if (_queue->head == _queue->max_size) _queue->head = 0;
 		_queue->points[_head] = p;
+		pthread_mutex_lock(&_queue->lock);
 		++_queue->size;
+		pthread_mutex_unlock(&_queue->lock);
+		pthread_cond_broadcast(&_queue->cond);
 	}
-	pthread_mutex_unlock(&_queue->lock);
 	return _head;
 }
 size_t len_queue(struct queue_t* queue)
@@ -291,13 +294,38 @@ void* pop_queue(struct queue_t* queue)
 	struct _queue_fixed* _queue = (struct _queue_fixed*)queue;
 
 	void *p = NULL;
-	pthread_mutex_lock(&_queue->lock);
 	if (_queue->size > 0) {
-		--_queue->size;
 		p = (void*)_queue->points[_queue->tail++];
 		if (_queue->tail == _queue->max_size) _queue->tail = 0;
+		pthread_mutex_lock(&_queue->lock);
+		--_queue->size;
+		pthread_mutex_unlock(&_queue->lock);
 	}
-	pthread_mutex_unlock(&_queue->lock);
+	return p;
+}
+void* pop_queue_timedwait(struct queue_t* queue)
+{
+	static struct timespec timeout = { 5, 0 };
+	struct _queue_fixed* _queue = (struct _queue_fixed*)queue;
+
+	void *p = NULL;
+GETTHINGS:
+	if (_queue->size > 0) {
+		p = (void*)_queue->points[_queue->tail++];
+		if (_queue->tail == _queue->max_size) _queue->tail = 0;
+		pthread_mutex_lock(&_queue->lock);
+		--_queue->size;
+		pthread_mutex_unlock(&_queue->lock);
+	} else {
+		pthread_mutex_lock(&_queue->lock);
+		int err = pthread_cond_timedwait(&_queue->cond, &_queue->lock, &timeout);
+		pthread_mutex_unlock(&_queue->lock);
+		if (err == ETIMEDOUT) {
+			p = NULL;
+		} else {
+			goto GETTHINGS;
+		}
+	}
 	return p;
 }
 void destory_queue(struct queue_t* queue)
@@ -345,39 +373,4 @@ int64_t ntohll(int64_t n)
 {
 	return (((int64_t)ntohl(n)) << 32) | ntohl(n >> 32);
 }
-
-int code_convert(char *from_charset, char *to_charset, char *inbuf, int inlen, char *outbuf, int outlen)
-{  
-	iconv_t cd;
-	char **pin = &inbuf;
-	char **pout = &outbuf;
-
-	cd = iconv_open(to_charset, from_charset);
-	if (0 == cd)  
-	{
-		LOGERROR("iconv_open error, %s", strerror(errno));
-		return -1;
-	}
-
-	memset(outbuf, 0, outlen);
-	if (iconv(cd, pin, &inlen, pout, &outlen) == -1)  
-	{
-		LOGERROR("iconv error, %s", strerror(errno));
-		return -1;
-	}
-
-	iconv_close(cd);
-	return 0;
-}  
-
-int u2g(char *inbuf, int inlen, char *outbuf, int outlen)
-{  
-	return code_convert("utf-8","gb2312", inbuf, inlen, outbuf, outlen);
-}  
-
-int g2u(char *inbuf, size_t inlen, char *outbuf, size_t outlen)
-{  
-	return code_convert("gb2312", "utf-8", inbuf, inlen, outbuf, outlen);
-}  
-
 

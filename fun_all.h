@@ -55,6 +55,7 @@ struct tcp_session
  **/
 int str_ipp(const char* ipport, struct hosts_t* hosts);
 void *inHosts(const void *hosts, const struct hosts_t *host);
+void* LoadHost(char* hostsbuff);
 
 #define IPHDR(packet) (struct iphdr*)((void*)(packet) + ((((struct ether_header*)(packet))->ether_type == htons(ETHERTYPE_IP)) ? ETHER_HDR_LEN : (ETHER_HDR_LEN+4)))
 #define TCPHDR(ippacket) (struct tcphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)

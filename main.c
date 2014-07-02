@@ -15,12 +15,13 @@
 #include <netinet/udp.h>
 #include <arpa/inet.h>
 
-#include <utils.h>
-#include <iface.h>
-#include <config.h>
-#include <fun_http.h>
-#include <server.h>
+#include "utils.h"
+#include "iface.h"
+#include "config.h"
+#include "fun_http.h"
+#include "server.h"
 #include "define.h"
+#include "statis.h"
 
 int SockManager;
 extern int SockMonitor[MONITOR_COUNT];
@@ -78,6 +79,12 @@ void ProcessCMD(int argc, char* argv[])
 	if (argc>1) {
 		if (strcmp(argv[1],"-v")==0){
 			ShowUsage(0);
+		} else if (strcmp(argv[1], "-d")==0) {
+			// TODO: debug
+		} else if (strcmp(argv[1], "-r")==0) {
+			DEBUG = 1;
+			PCAPFILE = strdup(argv[2]);
+			return;
 		} else {
 			ShowUsage(-1);
 		}
@@ -87,6 +94,8 @@ void ProcessCMD(int argc, char* argv[])
 
 void CheckRoot()
 {
+	if (DEBUG > 0) return;
+
 	if (getuid() != 0) {
 		fprintf(stderr, "You must be root\n");
 		exit(3);
@@ -121,9 +130,10 @@ int main(int argc, char* argv[])
 	int nerr = StartServer();
 	ASSERT(nerr == 0);
 	// init protocol_proce
-	LoadCaptureHost(CONFIG_PATH);
+	LoadHttpConf(HTTP_HOST_PATH_FILE);
 	HttpInit();
 
+	StartShowStatis();
 	// capture and process
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);
 	int nrecv = 0;
@@ -133,36 +143,36 @@ int main(int argc, char* argv[])
 		if (buffer == NULL) buffer = malloc( RECV_BUFFER_LEN); // TODO:
 		if (buffer == NULL) { LOGWARN0("no memory!"); sleep(1); continue; }
 
-		do 
-		{
-			nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
-			if (nrecv == 0) continue;
+		nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
+		if (nrecv == 0) continue;
 
-			struct ether_header *ehead = (struct ether_header*)buffer;
-			u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
-			if (ETHERTYPE_VLAN == eth_type) {			
-				eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
-			}
-			
-			if (ETHERTYPE_IP == eth_type) {
-				struct iphdr *iphead = IPHDR(buffer);
+		INC_TOTAL_PCAP;
 
-				if (iphead->protocol == IPPROTO_TCP) {
-					struct tcphdr *tcphead = TCPHDR(iphead);
+		struct ether_header *ehead = (struct ether_header*)buffer;
+		u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
+		if (ETHERTYPE_VLAN == eth_type) {			
+			eth_type = ((u_char)buffer[16])*256 + (u_char)buffer[17];
+		}
+		
+		if (ETHERTYPE_IP == eth_type) {
+			struct iphdr *iphead = IPHDR(buffer);
 
-					// Http filter.
-					if (FilterPacketForHttp(buffer, iphead, tcphead) == 0) 
-						break;
+			if (iphead->protocol == IPPROTO_TCP) {
+				struct tcphdr *tcphead = TCPHDR(iphead);
+
+				// Http filter.
+				if (FilterPacketForHttp(buffer, iphead, tcphead) >= 0) {
+					buffer = NULL;
 				}
 			}
-			buffer = NULL;
-		} 
-		while (Living);
+		}
 	}
 	LOGINFO0("ready to exit...");
+	HttpStop();
 	StopServer();
 	LOGINFO0("exit server...");
 	close_log();
+	PrintStatis();
 	return 0;
 }
 

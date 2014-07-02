@@ -27,6 +27,7 @@ static pcap_t *pcap_live[MONITOR_COUNT] = {0};
 
 extern int DEBUG;
 extern char* PCAPFILE;
+extern volatile int Living;
 
 int open_monitor(const char* interface, const char* fliter)
 {
@@ -77,7 +78,7 @@ int OpenPcapFile(const char* pcapfile, const char* filter)
 
 	pcap_freecode(&fp);
 	free(errbuff);
-	return 0;
+	return 1;
 }
 
 int OpenMonitorDevs()
@@ -126,13 +127,14 @@ int OpenMonitorDevs()
 
 int GetPacket_Debug(char* buffer, size_t size)
 {
-	const u_char *pcap_next(pcap_t *p, struct pcap_pkthdr *h);
+	sleep(0);
 	struct pcap_pkthdr *h;
 	const u_char* data;
 	int err = pcap_next_ex(Offline, &h, &data);
 	if (err == -2) {
 		LOGINFO0("will exit from debuging...");
-
+		Living = 0;
+		return 0;
 	}
 	if (h->caplen != h->len) {
 		LOGFATAL("pcap_next: buffer not longer. caplen=%u len=%u", h->caplen, h->len);
