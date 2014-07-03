@@ -9,6 +9,12 @@
 
 pthread_mutex_t mtx_ = PTHREAD_MUTEX_INITIALIZER;
 
+struct A {
+	int a, b;
+};
+
+typedef struct A b;
+
 int main(int argc, char* argv[])
 {
 	struct timeval begin, end;

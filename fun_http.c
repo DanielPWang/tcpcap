@@ -65,9 +65,12 @@ extern int _block_func_on;
 // IDL -> REQUESTING -> REQUEST -> REPONSEING -> REPONSE -> FINISH
 //           |------------|------------|------------------> TIMEOUT
 volatile int _http_living = 1;
+volatile time_t _http_active = 0;
 static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
+
+#include "fun_http_sessions.inc"
 
 // TODO: 
 //
@@ -147,6 +150,28 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 	return pSession;
 }
 
+void *_process_timeout(void* p)
+{
+	while (_http_living) {
+		sleep(1);
+		if (_http_active == 0) continue;
+
+		for (int index = 0; index < g_nMaxHttpSessionCount; ++index)	{
+			struct tcp_session* session = &_http_session[index];
+			if (session->flag != HTTP_SESSION_IDL && 
+				session->flag != HTTP_SESSION_FINISH) {
+				if (_http_active-session->update.tv_sec > g_nHttpTimeout) {
+					LOGWARN("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
+							index, _http_active, session->update, g_nHttpTimeout, session->flag);
+					session->flag = HTTP_SESSION_TIMEOUT;
+					push_queue(_whole_content, session);
+					break;
+				}
+			}
+		}
+	}
+	return NULL;
+}
 char* _IGNORE_EXT[] = { ".gif", ".js", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
 int NewHttpSession(const char* packet)
 {
@@ -156,65 +181,27 @@ int NewHttpSession(const char* packet)
 	unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
 	char *content = (void*)tcphead + tcphead->doff*4;
 	const char* cmdline = content;
-	if (loglevel() <= LOG_TRACE) {
-		char* enter = strchr(content, '\r');
-		if (enter == NULL) {
-			enter = strchr(content, '\n');
-			if (enter == NULL) return -1;
-		}
-		
-		char tmp = *enter;
-		*enter = '\0';
-		LOGTRACE("New http-session: %s", cmdline);
-		*enter = tmp;
+
+	char* enter = strchr(content, '\r');
+	if (enter == NULL) {
+		enter = strchr(content, '\n');
+		if (enter == NULL) return -1;	// TODO: wrong packet.
 	}
 	
+	char tmp = *enter;
+	int cmdlinen = enter-content;
+	*enter = '\0';
+	LOGTRACE("New http-session: %s", cmdline);
+	
 	for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
-		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;
+		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;	// TODO: ignore
 	}
+	*enter = tmp;
 
-	int index = 0;
-	for (; index < g_nMaxHttpSessionCount; ++index)		// todo: MAX_HTTP_SESSION
-	{
-		if (_http_session[index].flag != HTTP_SESSION_IDL && 
-			_http_session[index].flag != HTTP_SESSION_FINISH) 
-		{
-			// struct tcp_session* pREQ = &_http_session_array[nThreadIndex][index];
-			struct tcp_session* pREQ = &_http_session[index]; // TODO: up line
-			if (pREQ->client.ip.s_addr==iphead->saddr && pREQ->client.port==tcphead->source 
-				&& pREQ->server.ip.s_addr==iphead->daddr && pREQ->server.port==tcphead->dest
-				&& pREQ->seq == tcphead->seq && pREQ->ack == tcphead->ack_seq)  // TODO: why? add by jr
-			{ // client -> server be reuse.
-				LOGWARN("session[%d] channel is reused. flag=%d res1=%d res2=%d g_nReusedCount=%d", 
-						index, pREQ->flag, pREQ->res1, pREQ->res2, ++g_nReusedCount);
-				pREQ->flag = HTTP_SESSION_REUSED;
-				push_queue(_whole_content, pREQ);
-				// CleanHttpSession(pREQ);
-				break;
-			} 
-			else if (tv->tv_sec - pREQ->update.tv_sec > g_nHttpTimeout)	// TODO: HTTP_TIME_OUT
-			{
-				LOGWARN("one http_session is timeout. tv->tv_sec=%d pREQ->update=%d flag=%d index=%d res1=%d res2=%d g_nTimeOutCount=%d", 
-						tv->tv_sec, pREQ->update, pREQ->flag, index, pREQ->res1, pREQ->res2, ++g_nTimeOutCount);
-				pREQ->flag = HTTP_SESSION_TIMEOUT;
-				push_queue(_whole_content, pREQ);
-				break;
-			} else {
-				continue;
-			}
-		}
-		else if (HTTP_SESSION_IDL == _http_session[index].flag)
-		{
-			break;
-		}
-	}
 	struct tcp_session* pIDL = NULL;
 LOOP_DEBUG:
-	pIDL = (struct tcp_session*)pop_queue(_idl_session);
-	if (DEBUG && pIDL==NULL) {
-		sleep(1);
-		goto LOOP_DEBUG;
-	}
+	pIDL = (struct tcp_session*)pop_queue_timedwait(_idl_session);
+	if (DEBUG && pIDL==NULL) {	goto LOOP_DEBUG; }	// For test
 	if (pIDL == NULL) return -2;
 
 	pIDL->flag = HTTP_SESSION_REQUESTING;
@@ -245,17 +232,21 @@ LOOP_DEBUG:
 			&& content[contentlen-2]=='\r' && content[contentlen-1]=='\n') {
 		pIDL->flag = HTTP_SESSION_REQUEST;
 	}
-	if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug
+	if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug. maybe not complete
 		pIDL->flag = HTTP_SESSION_REQUEST;
 	}
 
 	pIDL->request_head = (char*)calloc(1, contentlen+1);
 	memcpy(pIDL->request_head, content, contentlen);	// TODO: why?
 	pIDL->request_head_len = contentlen+1;
-
+	// TODO:
+	pIDL->prev = NULL;
+	pIDL->next = NULL;
+	pIDL->query_url.content = cmdline;
+	pIDL->query_url.len = cmdlinen;
+	ASSERT (FLOW_GET(packet)!=C2S); 
 	LOGTRACE("Session[%d]Start request in NewHttpSession, content= %s", pIDL->index, content);
-	
-	return index;
+	return pIDL->index;
 }
 
 int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
@@ -802,6 +793,7 @@ int AppendReponse(const char* packet, int bIsCurPack)
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	struct tcp_session *pREQ = &_http_session[0];
+	int flow = FLOW_GET(packet);
 
 	int index = 0;
 	for (; index < g_nMaxHttpSessionCount; ++index) // TODO: MAX_HTTP_SESSION
@@ -882,19 +874,18 @@ void *HTTP_Thread(void* param)
 		if (*cmd == _get_image || *cmd == _post_image) {	// TODO: bug
 			// TODO: need to process RST and FIN
 			int nRes = NewHttpSession(packet);
-			if ( nRes < 0) {
-				if (nRes == -3) {
-					LOGDEBUG("Content is not html data. drop count = %d", ++g_nDropCountForImage);
-				} else if (nRes == -1) {
-					LOGWARN0("Content is error! Do not insert into session.");
-				} else if (nRes == -2) {
-					char *enter = strchr(content, '\r');
-					if (enter != NULL) {
-						*enter = '\0';
-						LOGWARN("_http_session is full. drop count = %d, drop content = %s", 
-								++g_nDropCountForSessionFull, content);
-						*enter = '\r';
-					}
+			if (nRes == -1) {
+				LOGERROR0("Query-Content is so short! Not insert into session.");
+				free((void*)packet);
+			} else if (nRes == -2) {
+				INC_DROP_PACKET;
+				char *enter = strchr(content, '\r');
+				if (enter != NULL) {
+					*enter = '\0';
+					LOGWARN("_http_session is full. drop content = %s", content);
+				} else {
+					content[32] = '\0';
+					LOGWARN("_http_session is full. drop content = %s", content);
 				}
 				free((void*)packet);
 			}
@@ -970,11 +961,12 @@ int HttpInit()
 	ASSERT(_working_session != NULL);
 	int err = pthread_rwlock_init(&_working_session_lock, NULL);
 	ASSERT(err == 0);
+	err = http_sessions_init();
+	ASSERT(err == 0);
 	//_use_session = init_queue(g_nMaxHttpSessionCount);
 	//ASSERT(_use_session != NULL);
 
-	for (size_t index = 0; index < g_nMaxHttpSessionCount; ++index)
-	{
+	for (size_t index = 0; index < g_nMaxHttpSessionCount; ++index) {
 		_http_session[index].index = index;
 		push_queue(_idl_session, &_http_session[index]);
 	}
@@ -1024,14 +1016,12 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 	struct hosts_t host1 = { {iphead->daddr}, tcphead->dest};
 	pthread_mutex_lock(&_host_ip_lock);
 	
-	if (tcphead->source == htons(80)){
-		if (inHosts(_valid_hosts, &host)!=NULL || inHosts(_valid_hosts, &host1)!=NULL) {
-			nRs = PushHttpPack(buffer, iphead, tcphead);
-		} 
-	}else{
-		if (inHosts(_valid_hosts, &host1)!=NULL || inHosts(_valid_hosts, &host)!=NULL) {
-			nRs = PushHttpPack(buffer, iphead, tcphead);
-		} 
+	if (inHosts(_valid_hosts, &host)!=NULL ) {
+		nRs = PushHttpPack(buffer, iphead, tcphead);
+		FLOW_SET(buffer, S2C);
+	} else if (inHosts(_valid_hosts, &host1)!=NULL) {
+		nRs = PushHttpPack(buffer, iphead, tcphead);
+		FLOW_SET(buffer, C2S);
 	}
 	const char *content = (const char *)tcphead + tcphead->doff*4;
 	unsigned *cmd = (unsigned*)content;

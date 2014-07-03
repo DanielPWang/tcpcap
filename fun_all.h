@@ -8,6 +8,10 @@
 #include <netinet/tcp.h>
 #include <time.h>
 
+enum FLOWDIR {
+	C2S,
+	S2C
+};
 struct hosts_t
 {
 	struct in_addr ip;
@@ -15,8 +19,8 @@ struct hosts_t
 } __attribute__((packed));
 
 struct line_t {
-	char* begin;
-	char* end;
+	const char* content;
+	int len;
 };
 
 // it should be http_session
@@ -60,8 +64,8 @@ struct tcp_session
 	char *response_head;
 	char *cur_content;
 	char *part_content;
-	void *prev;
-	void *next;
+	struct tcp_session *prev;
+	struct tcp_session *next;
 };
 
 struct http_sessions_t{
@@ -79,6 +83,8 @@ void* LoadHost(char* hostsbuff);
 #define IPHDR(packet) (struct iphdr*)((void*)(packet) + ((((struct ether_header*)(packet))->ether_type == htons(ETHERTYPE_IP)) ? ETHER_HDR_LEN : (ETHER_HDR_LEN+4)))
 #define TCPHDR(ippacket) (struct tcphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
 #define UDPHDR(ippacket) (struct udphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
+#define FLOW_SET(packet, x) (*(char*)(((void*)packet)+sizeof(struct timeval)) = (x))
+#define FLOW_GET(packet) (*(char*)(((void*)packet)+sizeof(struct timeval)))
 
 #endif
 

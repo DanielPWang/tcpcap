@@ -24,6 +24,8 @@ OBJFILES = $(patsubst %.c,$(OUTDIR)%.o,$(SRCFILES))
 LIBRARYS = -lpthread -lz -lpcap  
 
 all: $(OUTDIR) $(TARGET)
+	@cp -af config ../agent/
+	@cp -f $(TARGET) ../agent
 	@echo 'End compiling. $(shell date +"%F %T")'
 
 $(OUTDIR):

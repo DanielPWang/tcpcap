@@ -5,11 +5,12 @@
 
 extern volatile int Living;
 
- uint32_t total_pcap = 0u;
- uint32_t packets_pushed = 0u;
- uint32_t packets_pop = 0u;
- uint32_t sent_count = 0u;
- uint32_t whole_html_session = 0u;
+uint32_t total_pcap = 0u;
+uint32_t packets_pushed = 0u;
+uint32_t packets_pop = 0u;
+uint32_t sent_count = 0u;
+uint32_t whole_html_session = 0u;
+uint32_t drop_packet_count = 0u;
 
 #define P(x) printf("\t" #x " = %u\n", x)
 void PrintStatis()
@@ -19,15 +20,16 @@ void PrintStatis()
 	P(packets_pop);
 	P(sent_count);
 	P(whole_html_session);
+	P(drop_packet_count);
 }
 void PrintTitle()
 {
-	printf("CAP\tPKTSIN\tPKTSOUT\tSEND\tWHOLE\n");
+	printf("CAP\tPKTSIN\tPKTSOUT\tSEND\tWHOLE\tDROPPKT\n");
 }
 void PrintStati()
 {
-	printf("%u\t%u\t%u\t%u\t%u\t\n", total_pcap, packets_pushed, packets_pop,
-			sent_count, whole_html_session);
+	printf("%u\t%u\t%u\t%u\t%u\t%u\t\n", total_pcap, packets_pushed, packets_pop,
+			sent_count, whole_html_session, drop_packet_count);
 }
 void* _show_statis_thread(void* p)
 {

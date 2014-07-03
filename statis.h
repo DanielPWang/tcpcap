@@ -6,12 +6,14 @@ extern uint32_t packets_pushed;
 extern uint32_t packets_pop;
 extern uint32_t sent_count;
 extern uint32_t whole_html_session;
+extern uint32_t drop_packet_count;
 
-#define INC_TOTAL_PCAP { ++total_pcap; }
-#define INC_PUSH_PACKETS { ++ packets_pushed; }
-#define INC_POP_PACKETS { ++packets_pop; }
-#define INC_SENT_HTTP { ++sent_count; }
-#define INC_WHOLE_HTML_SESSION { ++whole_html_session; }
+#define INC_TOTAL_PCAP do{ ++total_pcap; }while(0)
+#define INC_PUSH_PACKETS do{ ++ packets_pushed; }while(0)
+#define INC_POP_PACKETS do{ ++packets_pop; }while(0)
+#define INC_SENT_HTTP do{ ++sent_count; }while(0)
+#define INC_WHOLE_HTML_SESSION do{ ++whole_html_session; }while(0)
+#define INC_DROP_PACKET do{ ++drop_packet_count; }while(0)
 
 void PrintStatis();
 void StartShowStatis();
