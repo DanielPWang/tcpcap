@@ -43,27 +43,28 @@ struct tcp_session
 	uint32_t res_true_len;
 	uint32_t later_pack_size;
 	uint32_t index;
-	uint32_t request_head_len;
-	uint32_t request_head_len_valid_flag;
-	uint32_t response_head_len;
-	uint32_t response_head_gen_time;
 	uint32_t cur_content_len;
 	uint32_t part_content_len;
 	struct timeval create;	// first
 	struct timeval update;		// the lasttime update. TODO: time_t
 	struct line_t query_url;
-	struct line_t response_http;
-	struct line_t response_content_type;
-	struct line_t response_content_length;
-	struct line_t response_trans_encoding;
+	struct line_t http;
+	struct line_t content_type;
+	struct line_t content_length;
+	struct line_t trans_encoding;
 	void *data;
 	void *lastdata;
 	void *pack_later;
 	void *last_pack_later;
-	//char *request_head;
-	//char *response_head;
+	char *request_head;
+	char *response_head;
 	//char *cur_content;
 	//char *part_content;
+	uint32_t request_head_len;
+	uint32_t request_head_len_valid_flag;
+	uint32_t response_head_len;
+	uint32_t response_head_gen_time;
+
 	struct tcp_session *prev;
 	struct tcp_session *next;
 };

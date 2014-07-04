@@ -70,7 +70,40 @@ static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
 
-#include "fun_http_sessions.inc"
+// Content-Type: text/html; charset=gbk\r\n
+// Content-Length: 26\r\n
+// Content-Encoding: gzip\r\n
+// Transfer-Encoding: chunked\r\n
+static const char Content_Length[] = "content-length";
+static const char Content_Type[] = "content-type";
+static const char Content_Encoding[] = "content-encoding";
+static const char Transfer_Encoding[] = "transfer-encoding";
+
+struct _type_content_t {
+	int type;
+	char *content;
+	int len;
+};
+// Notice: jscript,text => text/jscript, text/xxx
+struct _type_content_t CONTENT_TYPE[] = {
+	{ HTTP_CONTENT_JSCRIPT, "javascript", 10 },	// text/javascript
+	{ HTTP_CONTENT_IMAGE, "image", 5 },		// image/git jpeg ico
+	{ HTTP_CONTENT_HTML, "text", 4 },	// text/html text/xml text/plain
+	{ HTTP_CONTENT_HTML, "json", 4},
+	{ HTTP_CONTENT_HTML, "x-ami", 5 },	// application/x-ami
+	{ HTTP_CONTENT_FILE, "application", 11},	// ignore next
+	{ HTTP_CONTENT_FILE, "pdf", 3 },
+	{ HTTP_CONTENT_FILE, "kdh", 3 },
+	{ HTTP_CONTENT_FILE, "x-research-info-systems", 23},
+	{ HTTP_CONTENT_FILE, "pdg", 3},
+	{ HTTP_CONTENT_FILE, "x-ceb", 5},
+	{ HTTP_CONTENT_FILE, "octet-stream", 12},
+	{ HTTP_CONTENT_FILE, "x-download", 10},
+	{ HTTP_CONTENT_FILE, "caj", 3},
+	{ HTTP_CONTENT_FILE, "bibtex", 6},
+	{ HTTP_CONTENT_FILE, "x-no-such-app", 13} // ...rtf ms-excel postscript ms-word
+};
+// #include "fun_http_sessions.inc"
 
 // TODO: 
 //
@@ -206,7 +239,7 @@ LOOP_DEBUG:
 	pIDL->response_head_recv_flag = 0;
 	pIDL->content_encoding_gzip = 0;
 	pIDL->content_type = HTTP_CONTENT_NONE;
-	//pIDL->response_head = NULL;
+	pIDL->response_head = NULL;
 	pIDL->response_head_gen_time = 0;
 	pIDL->response_head_len = 0;
 	pIDL->request_head_len_valid_flag = 0;
@@ -238,147 +271,90 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	unsigned contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
-	const char *content = (void*)tcphead + tcphead->doff*4;
+	char *content = (void*)tcphead + tcphead->doff*4;
 	struct tcp_session *pSession = &_http_session[nIndex];
 
 	// TODO: not deal with wrong order. seq == ack_seq
-	pSession->flag = HTTP_SESSION_RESPONSEING;
 	pSession->seq = tcphead->ack_seq;
 	pSession->ack = tcphead->seq;
 	pSession->res0 = contentlen;
 	pSession->update = *tv;
 
+	if (contentlen == 0) {
+		if (tcphead->rst) {
+			LOGTRACE("Session[%d] be reset.", index);
+			pSession->flag = HTTP_SESSION_RESET;
+			if (contentlen > 0) { LOGERROR("Session[%d].len = %u. droped.", contentlen); }
+		}
+		free(pPacket);
+		return HTTP_APPEND_SUCCESS;
+	}
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
 	pSession->lastdata = (void*)pPacket;
 
-	// reponse length
-	if ((*(unsigned*)content == _http_image) || (pSession->res1 == 0))
-	{
-	} else {
-		if ((HTTP_TRANSFER_INIT == pSession->transfer_flag) && (NULL != pSession->response_head))
-		{
-			LOGDEBUG("Session[%d] the next response contentlen=%d, content= %s",
-				nIndex, contentlen, content);
-			int last_len = pSession->response_head_len;
-			pSession->response_head = realloc(pSession->response_head, last_len + contentlen);
-			memcpy(pSession->response_head+last_len-1, content, contentlen);
-			pSession->response_head[last_len+contentlen-1] = '\0';
-			pSession->response_head_len = last_len + contentlen;
-			pSession->response_head_gen_time++;
-			content = pSession->response_head;
-			contentlen = last_len + contentlen;
-			if ((memmem(content, contentlen, "\r\n\r\n", 4) != NULL)
-				|| (3 == pSession->response_head_gen_time))
-			{
-				LOGDEBUG("Session[%d] response head generate successfully. content= %s",
-					nIndex, content);
-				
-				pSession->response_head_recv_flag = 1;
-			}
-			else
-			{
-				LOGDEBUG("Session[%d] response head is not enough, continue to generate. content= %s",
-					nIndex, content);
+	if ((*(unsigned*)content == _http_image)) {
+		pSession->flag = HTTP_SESSION_RESPONSEING;
+		if (pSession->response_head==NULL) {
+			pSession->response_head = (char*) malloc(RECV_BUFFER_LEN);
+			if (pSession->response_head == NULL) {
+				LOGERROR0("less memory.");
 			}
 		}
-		else
-		{
-			pSession->res2 += contentlen;
-			LOGTRACE("Session[%d] part_reponse_len = %u/%u", nIndex, pSession->res2, pSession->res1);
+		char* p = memchr(content, '\r', contentlen);
+		if (p==NULL) { 
+			pSession->http.content = content;
+			pSession->http.len = contentlen;
+		} else {
+			pSession->http.content = content;
+			pSession->http.len = p-content;
 		}
 	}
-		
-	if (1 == pSession->response_head_recv_flag)
-	{
-		pSession->response_head_recv_flag = 0;
-		pSession->transfer_flag = HTTP_TRANSFER_NONE;
-		strlwr((char*)content);	// TODO: should be stupid. const char* => char*
-		LOGDEBUG("Session[%d] response head generate contentlen= %d, content= %s", nIndex, contentlen, content);
-		
-		char* content_encoding = memmem(content, contentlen, "content-encoding: gzip", 22);
-		if (content_encoding != NULL)
-			pSession->content_encoding_gzip = 1;
-
-		char* content_type = memmem(content, contentlen, "content-type: ", 14);
-		if (content_type != NULL)
-		{
-			if (strncmp(content_type+14, "text/html", 9) == 0 
-				|| strncmp(content_type+14, "text/xml", 8) == 0 
-				|| strncmp(content_type+14, "text/plain", 10) == 0
-				|| strncmp(content_type+14, "application/x-ami", 17) == 0)
-			{
-				pSession->content_type = HTTP_CONTENT_HTML;
-			}
-			else if (strncmp(content_type+14, "application/pdf", 15) == 0)
-			{
-				pSession->content_type = HTTP_CONTENT_FILE_PDF;
-			}
-			else if (strncmp(content_type+14, "application/kdh", 15) == 0)
-			{
-				pSession->content_type = HTTP_CONTENT_FILE_KDH;
-			}
-			else if (strncmp(content_type+14, "application/x-ceb", 17) == 0)
-			{
-				if (pSession->request_head != NULL)
-				{
-					char *tmp = NULL;
-					char *pszReqRange = memmem(pSession->request_head, pSession->request_head_len, "Range: bytes=0-", 15);
-					if (pszReqRange != NULL)
-					{
-						int nReqMax = strtol(pszReqRange+15, &tmp, 10);
-						char *pszResRange = memmem(content, contentlen, "content-range: bytes 0-", 23);
-						if ((nReqMax > 0) && (pszResRange != NULL))
-						{
-							char *pszResRangeSep = strchr(pszResRange, '/');	
-							if (pszResRangeSep != NULL)
-							{
-								*pszResRangeSep = '\r';
-								int nResMax = strtol(pszResRange+23, &tmp, 10);
-								*pszResRangeSep = '/';
-								if (nResMax == nReqMax)
-								{
-									pszResRangeSep++;
-									int nTotalNum = strtol(pszResRangeSep, &tmp, 10);
-									if ((nResMax+1) == nTotalNum)
-										pSession->content_type = HTTP_CONTENT_FILE_CEB;
-								}
-							}
-						}
-					}
+	if (pSession->flag == HTTP_SESSION_RESPONSEING) {
+		char* end = NULL;
+		end = (char*)memmem(content, contentlen, "\r\n\r\n", 4);
+		if (end != NULL) { 
+			pSession->flag = HTTP_SESSION_REPONSE; 
+		}
+		if (pSession->response_head!=NULL) {	// no memory
+			uint32_t clen = contentlen;
+			if (end != NULL) { clen = end-content; }
+			if (pSession->response_head_len+contentlen >= RECV_BUFFER_LEN) {
+				LOGERROR0("Response-head is too longer. maybe wrong");
+				clen = RECV_BUFFER_LEN-pSession->response_head_len-1;
+			} 
+			memcpy(pSession->response_head+pSession->response_head_len, content, clen);
+			pSession->response_head_len += clen;
+			pSession->response_head[pSession->response_head_len] = '\0';
+		}
+	}
+	if (pSession->flag==HTTP_SESSION_REPONSE && pSession->response_head != NULL) {
+		strlwr(pSession->response_head);
+		char* content_length = (char*)memmem(pSession->response_head, pSession->response_head_len,
+				Content_Length, sizeof(Content_Length));
+		if (content_length_b == NULL) { LOGINFO0("No Content-Length."); } else {
+			pSession->res1 = strtoul(content_length_b, NULL, 10);
+			ASSERT(pSession->res1 == 0);
+			pSession->transfer_flag = HTTP_TRANSFER_HAVE_CONTENT_LENGTH;
+		}
+		char* content_type = (char*)memmem(pSession->response_head, pSession->response_head_len,
+				Content_Type, sizeof(Content_Type));
+		if (content_type==NULL) { LOGINFO0("No Content-Type."); } else {
+			char* lf = strchr(content_type, '\r');
+			uint32_t len = lf==NULL? pSession->response_head_len-(content_type-pSession->response_head):(lf-content_type);
+			char* type = content_type+sizeof(Content_Type)+1;
+			for (int n=0; n < sizeof(_TYPE_CONTENT)/sizeof(_TYPE_CONTENT[0]); ++n){
+				if (memmem(type, len, _TYPE_CONTENT[n].content, _TYPE_CONTENT[n].len)!=NULL) {
+					pSession->content_type = _TYPE_CONTENT[n].type;
+					break;
 				}
-			}
-			else if ((strncmp(content_type+14, "application/octet-stream", 24) == 0)
-					   || (strncmp(content_type+14, "application/x-download", 22) == 0))
-			{	// TODO: add download file.
-				char* pszFileType = memmem(content, contentlen, ".pdf", 4);
-				if (pszFileType != NULL)
-					pSession->content_type = HTTP_CONTENT_FILE_PDF;					
-				else
-					pSession->content_type = HTTP_CONTENT_FILE_OTHER;
 			}
 		}
-		else
-		{
-			char *tmp = NULL;
-			char *pszContentLen = memmem(content, contentlen, "content-length:", 15);
-			char *pszTE = memmem(content, contentlen, "transfer-encoding:", 18);
-			char *pszChunked = memmem(content, contentlen, "chunked", 7);
-			if ((pszContentLen == NULL) && ((pszTE == NULL) || (pszChunked == NULL)))
-			{
-				char *pszCode = memmem(content, contentlen, "http/1.1 200", 12);
-				if (pszCode == NULL)
-					pszCode = memmem(content, contentlen, "http/1.0 200", 12);
-				
-				if (pszCode != NULL)
-				{
-					LOGDEBUG("Session[%d]with html end, g_nHtmlEnd=%d content= %s", nIndex, ++g_nHtmlEnd, content);
-					pSession->transfer_flag = HTTP_TRANSFER_WITH_HTML_END;
-				}
-				else
-				{
-					LOGDEBUG("Session[%d]with transfer none, g_nNone=%d content= %s", nIndex, ++g_nNone, content);
-					pSession->transfer_flag = HTTP_TRANSFER_NONE;
+		// TODO: gzip
+		pSession->flag = HTTP_SESSION_REPONSE_ENTITY;
+	}		
+	if (1 == pSession->response_head_recv_flag)
+	{
 				}
 			}
 		}

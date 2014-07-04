@@ -349,15 +349,11 @@ size_t count_char(const char* str, const char c)
 
 char* strlwr(char *str)
 {
-	if (NULL == str)
-		return str;
+	if (NULL == str) return str;
 
 	char *pTmp = str;
-	while (*pTmp != '\0')
-	{
-		if (*pTmp >= 'A' && *pTmp <= 'Z')
-			*pTmp += 32;
-
+	while (*pTmp) {
+		if (*pTmp >= 'A' && *pTmp <= 'Z') *pTmp += 32; 
 		pTmp++;
 	}
 
