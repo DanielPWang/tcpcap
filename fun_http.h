@@ -76,9 +76,9 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
 int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);
-int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack);
+int AppendServerToClient(int nIndex, const char* pPacket);
 int AppendClientToServer(int nIndex, const char* pPacket);
-int AppendReponse(const char* packet, int bIsCurPack);
+int AppendReponse(const char* packet);
 
 #endif
 

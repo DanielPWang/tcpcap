@@ -112,29 +112,13 @@ struct tcp_session* CleanHttpSession(struct tcp_session* pSession)
 
 		LOGDEBUG("Session[%d] clean packet_later data successfully!", pSession->index);
 		
-		if (pSession->request_head!=NULL)
-		{
-			free(pSession->request_head);
-			pSession->request_head = NULL;
-		}
+		//if (pSession->request_head!=NULL) { free(pSession->request_head); pSession->request_head = NULL; }
 
-		if (pSession->response_head!=NULL)
-		{
-			free(pSession->response_head);
-			pSession->response_head = NULL;
-		}
+		//if (pSession->response_head!=NULL) { free(pSession->response_head); pSession->response_head = NULL; }
 		// TODO: add by jrl why?
-		if (pSession->cur_content!=NULL)
-		{
-			free(pSession->cur_content);
-			pSession->cur_content = NULL;
-		}
+		//if (pSession->cur_content!=NULL) { free(pSession->cur_content); pSession->cur_content = NULL; }
 		
-		if (pSession->part_content!=NULL)
-		{
-			free(pSession->part_content);
-			pSession->part_content = NULL;
-		}
+		//if (pSession->part_content!=NULL) { free(pSession->part_content); pSession->part_content = NULL; }
 		// END
 		
 		LOGDEBUG("Session[%d] clean response_head successfully!", pSession->index);
@@ -178,7 +162,7 @@ int NewHttpSession(const char* packet)
 	struct timeval *tv = (struct timeval*)packet;
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead=TCPHDR(iphead);
-	unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
+	unsigned contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
 	char *content = (void*)tcphead + tcphead->doff*4;
 	const char* cmdline = content;
 
@@ -222,7 +206,7 @@ LOOP_DEBUG:
 	pIDL->response_head_recv_flag = 0;
 	pIDL->content_encoding_gzip = 0;
 	pIDL->content_type = HTTP_CONTENT_NONE;
-	pIDL->response_head = NULL;
+	//pIDL->response_head = NULL;
 	pIDL->response_head_gen_time = 0;
 	pIDL->response_head_len = 0;
 	pIDL->request_head_len_valid_flag = 0;
@@ -236,9 +220,6 @@ LOOP_DEBUG:
 		pIDL->flag = HTTP_SESSION_REQUEST;
 	}
 
-	pIDL->request_head = (char*)calloc(1, contentlen+1);
-	memcpy(pIDL->request_head, content, contentlen);	// TODO: why?
-	pIDL->request_head_len = contentlen+1;
 	// TODO:
 	pIDL->prev = NULL;
 	pIDL->next = NULL;
@@ -249,137 +230,31 @@ LOOP_DEBUG:
 	return pIDL->index;
 }
 
-int AppendServerToClient(int nIndex, const char* pPacket, int bIsCurPack)
+int AppendServerToClient(int nIndex, const char* pPacket)
 { 
 	ASSERT(nIndex >= 0);
 	
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
-	unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
+	unsigned contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
 	const char *content = (void*)tcphead + tcphead->doff*4;
 	struct tcp_session *pSession = &_http_session[nIndex];
 
-	// Check seq and ack. not fix.
-	if (pSession->seq != tcphead->ack_seq || (pSession->ack+pSession->res0) != tcphead->seq)
-	{ 
-		if (pSession->ack == tcphead->seq && (pSession->seq + pSession->res0) == tcphead->ack_seq)  
-		{// it's not woring on first time.
-			LOGDEBUG("S->C packet for first response. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-			char *pszCode = (char*)memmem(content, contentlen, "HTTP/1.1 100", 12);	
-			if (pszCode == NULL) pszCode = memmem(content, contentlen, "HTTP/1.0 100", 12);
-
-			if (pszCode != NULL) {
-				LOGERROR("HTTP/1.x 100 - Droped. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-
-				pSession->flag = HTTP_SESSION_RESPONSEING;
-				pSession->seq = tcphead->ack_seq;
-				pSession->ack = tcphead->seq;
-				pSession->res0 = contentlen;
-				pSession->update = *tv;
-				
-				return HTTP_APPEND_DROP_PACKET;
-			}
-		}
-		else if (((pSession->ack + pSession->res0) == tcphead->seq) && (abs(tcphead->ack_seq - pSession->seq) <= 4380))
-		{ // TODO: why? check old. 
-			LOGDEBUG("Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-			
-			// TODO: why? add by setupid
-			if ((*(unsigned*)content == _http_image) && (pSession->transfer_flag != HTTP_TRANSFER_INIT))
-			{
-				LOGWARN("Drop this packet for response repeatly. Session[%d] S->C packet, tcphead->ack_seq != pSession->seq. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-					nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-				
-				return HTTP_APPEND_DROP_PACKET;
-			}
-		}
-		else 
-		{
-			if (bIsCurPack 
-				&& (((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq))
-					 || ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)))
-			{
-				if (pSession->later_pack_size != MAX_LATER_PACKETS)
-				{
-					if (pSession->pack_later == NULL)
-						pSession->pack_later = (void*)pPacket;
-					else
-						*(const char**)pSession->last_pack_later = pPacket;
-
-					*(const char**)pPacket = NULL;
-					pSession->last_pack_later = (void*)pPacket;
-					pSession->later_pack_size++;
-
-					LOGDEBUG("This packet is later packet for S->C wrong order. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-
-					return HTTP_APPEND_ADD_PACKET_LATER;
-				}
-				else
-				{
-					CleanHttpSession(pSession);
-					LOGWARN("Drop this packet and clean session. The later packet size is max. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-							nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-
-					return HTTP_APPEND_DROP_PACKET;
-				}
-			}
-			else
-			{	// TODO: Check old.
-				if (!bIsCurPack
-					&& (((pSession->seq == tcphead->ack_seq) && ((pSession->ack + pSession->res0) < tcphead->seq))
-						|| ((pSession->seq + pSession->res0) == tcphead->ack_seq && pSession->ack < tcphead->seq)))
-				{
-					return HTTP_APPEND_ADD_PACKET_LATER;
-				}
-				
-				LOGDEBUG("Drop this packet for S->C wrong order. Session[%d] pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", 
-						nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-				
-				return HTTP_APPEND_DROP_PACKET;
-			}
-		}
-	}
-	else
-	{
-		//LOGDEBUG("Session[%d] S->C packet. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u content= %s", //ljr
-		//		nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen, content);
-		LOGDEBUG("Session[%d] S->C packet. pre.seq=%u pre.ack=%u pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u",
-				nIndex, pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-	}
-	
+	// TODO: not deal with wrong order. seq == ack_seq
 	pSession->flag = HTTP_SESSION_RESPONSEING;
 	pSession->seq = tcphead->ack_seq;
 	pSession->ack = tcphead->seq;
 	pSession->res0 = contentlen;
-	if (bIsCurPack)
-		pSession->update = *tv;
+	pSession->update = *tv;
 
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
 	pSession->lastdata = (void*)pPacket;
 
 	// reponse length
-	if ((*(unsigned*)content == _http_image) || 
-			((pSession->res1 == 0)
-			&& (HTTP_TRANSFER_INIT == pSession->transfer_flag) 
-			&& (NULL == pSession->response_head) ))     // TODO: bug. Content-Length被分到两个包中
+	if ((*(unsigned*)content == _http_image) || (pSession->res1 == 0))
 	{
-		pSession->response_head = (char*)calloc(1, contentlen+1);
-		memcpy(pSession->response_head, content, contentlen);
-		pSession->response_head_len = contentlen+1;
-		pSession->response_head_gen_time++;
-		if (memmem(content, contentlen, "\r\n\r\n", 4) != NULL) {
-			pSession->response_head_recv_flag = 1;
-			content = pSession->response_head;	
-		} else {
-			LOGDEBUG("Session[%d] response head is not enough, continue to generate. content= %s",
-				nIndex, content);
-		}
 	} else {
 		if ((HTTP_TRANSFER_INIT == pSession->transfer_flag) && (NULL != pSession->response_head))
 		{
@@ -665,7 +540,7 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
-	int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
+	int contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
 	const char *content = (void*)tcphead + tcphead->doff*4;
 	struct tcp_session *pSession = &_http_session[nIndex];
 
@@ -739,7 +614,7 @@ int AppendLaterPacket(int nIndex)
 		{
 			pCurTmp = pLaterPack;
 			pLaterPack = *(void**)pLaterPack;
-			int nRs = AppendServerToClient(nIndex, pCurTmp, 0);
+			int nRs = AppendServerToClient(nIndex, pCurTmp);
 			LOGDEBUG("Process later packet, ******** nRs=%d ******** index=%d", nRs, nIndex);
 			
 			if (nRs == HTTP_APPEND_DROP_PACKET 
@@ -806,9 +681,9 @@ int AppendReponse(const char* packet, int bIsCurPack)
 		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
 			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) // server -> client
 		{
-			nRs = AppendServerToClient(index, packet, bIsCurPack);
-			if (nRs == HTTP_APPEND_ADD_PACKET || nRs == HTTP_APPEND_ADD_PACKET_LATER)
-			{
+			ASSERT(FLOW_GET() == S2C);
+			nRs = AppendServerToClient(index, packet);
+			if (nRs == HTTP_APPEND_ADD_PACKET || nRs == HTTP_APPEND_ADD_PACKET_LATER) {
 				AppendLaterPacket(index);
 			}
 			else if (nRs == HTTP_APPEND_DROP_PACKET)
@@ -858,14 +733,14 @@ void *HTTP_Thread(void* param)
 		struct timeval *tv = (struct timeval*)packet;
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
-		int contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
-		char *content = (void*)tcphead + tcphead->doff*4;
+		iphead->tot_len = ntohs(iphead->tot_len);
+		int contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
 
-		if (tcphead->syn || contentlen <=0) { 
+		if (tcphead->syn&&contentlen<=0) { 
 			free((void*)packet); 
 			continue; 
 		} 
-
+		char *content = (void*)tcphead + tcphead->doff*4;
 		// TMP
 		tcphead->seq = ntohl(tcphead->seq);
 		tcphead->ack_seq = ntohl(tcphead->ack_seq);
@@ -1023,11 +898,9 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 		nRs = PushHttpPack(buffer, iphead, tcphead);
 		FLOW_SET(buffer, C2S);
 	}
-	const char *content = (const char *)tcphead + tcphead->doff*4;
-	unsigned *cmd = (unsigned*)content;
+
 	if (nRs == -1) {
-		struct in_addr sip; 
-		struct in_addr dip; 
+		struct in_addr sip, dip; 
 
 		sip.s_addr = iphead->saddr;
 		dip.s_addr = iphead->daddr;
@@ -1194,7 +1067,7 @@ int GetHttpData(char **data)
 	do {
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
-		unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
+		unsigned contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
 		http_len += contentlen;
 		//const char *content = (void*)tcphead + tcphead->doff*4;
 		packet = *(void**)packet;
@@ -1228,7 +1101,7 @@ int GetHttpData(char **data)
 	do {
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
-		unsigned contentlen = ntohs(iphead->tot_len) - iphead->ihl*4 - tcphead->doff*4;
+		unsigned contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
 		if (contentlen > RECV_BUFFER_LEN) {
 			LOGERROR("contentlen[%u] is great than RECV_BUFFER_LEN[%u]", contentlen, RECV_BUFFER_LEN);
 		}

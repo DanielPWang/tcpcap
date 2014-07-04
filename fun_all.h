@@ -28,27 +28,27 @@ struct tcp_session
 {
 	struct hosts_t client;		// assume
 	struct hosts_t server;
-	unsigned flag;		// ACK,SYN,FIN,RST,IDL,S1,S2,S3
-	unsigned seq;		// client
-	unsigned ack;		// client
-	unsigned transfer_flag;
-	unsigned response_head_recv_flag;  // 1:recv ok; 0:default
-	unsigned content_encoding_gzip;	   // 1:gzip; 0:no encoding
-	unsigned content_type;			   // 0:no match; 1:html; 2:file
-	unsigned finish_type;
-	unsigned force_restore_flag;
-	unsigned res0;
-	unsigned res1;
-	unsigned res2;
-	unsigned res_true_len;
-	unsigned later_pack_size;
-	unsigned index;
-	unsigned request_head_len;
-	unsigned request_head_len_valid_flag;
-	unsigned response_head_len;
-	unsigned response_head_gen_time;
-	unsigned cur_content_len;
-	unsigned part_content_len;
+	uint32_t flag;		// ACK,SYN,FIN,RST,IDL,S1,S2,S3
+	uint32_t seq;		// client
+	uint32_t ack;		// client
+	uint32_t transfer_flag;
+	uint32_t response_head_recv_flag;  // 1:recv ok; 0:default
+	uint32_t content_encoding_gzip;	   // 1:gzip; 0:no encoding
+	uint32_t content_type;			   // 0:no match; 1:html; 2:file
+	uint32_t finish_type;
+	uint32_t force_restore_flag;
+	uint32_t res0;
+	uint32_t res1;
+	uint32_t res2;
+	uint32_t res_true_len;
+	uint32_t later_pack_size;
+	uint32_t index;
+	uint32_t request_head_len;
+	uint32_t request_head_len_valid_flag;
+	uint32_t response_head_len;
+	uint32_t response_head_gen_time;
+	uint32_t cur_content_len;
+	uint32_t part_content_len;
 	struct timeval create;	// first
 	struct timeval update;		// the lasttime update. TODO: time_t
 	struct line_t query_url;
@@ -60,10 +60,10 @@ struct tcp_session
 	void *lastdata;
 	void *pack_later;
 	void *last_pack_later;
-	char *request_head;
-	char *response_head;
-	char *cur_content;
-	char *part_content;
+	//char *request_head;
+	//char *response_head;
+	//char *cur_content;
+	//char *part_content;
 	struct tcp_session *prev;
 	struct tcp_session *next;
 };
