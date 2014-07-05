@@ -24,7 +24,7 @@ struct line_t {
 };
 
 // it should be http_session
-struct tcp_session
+struct http_session
 {
 	struct hosts_t client;		// assume
 	struct hosts_t server;
@@ -37,8 +37,8 @@ struct tcp_session
 	uint32_t content_type;			   // 0:no match; 1:html; 2:file
 	uint32_t finish_type;
 	uint32_t force_restore_flag;
-	uint32_t res0;
-	uint32_t res1;
+	uint32_t contentlen;
+	uint32_t http_content_length;
 	uint32_t res2;
 	uint32_t res_true_len;
 	uint32_t later_pack_size;
@@ -62,12 +62,12 @@ struct tcp_session
 	uint32_t response_head_len;
 	uint32_t response_head_gen_time;
 
-	struct tcp_session *prev;
-	struct tcp_session *next;
+	struct http_session *prev;
+	struct http_session *next;
 };
 
 struct http_sessions_t{
-	struct tcp_session* head;
+	struct http_session* head;
 	pthread_mutex_t lock;
 	uint32_t	used;
 };

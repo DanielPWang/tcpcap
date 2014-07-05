@@ -20,13 +20,13 @@ HttpSessions http_sessions_get(struct hosts_t* host)
 	index ^= host->port;
 	return &_http_sessions[index];
 }
-inline struct tcp_session* http_sessions_first(HttpSessions sessions)
+inline struct http_session* http_sessions_first(HttpSessions sessions)
 {
 	return sessions->head;
 }
-struct tcp_session* http_sessions_add_new(HttpSessions sessions, const struct tcp_session* Session)
+struct http_session* http_sessions_add_new(HttpSessions sessions, const struct http_session* Session)
 {
-	struct tcp_session* session = (struct tcp_session*)Session;
+	struct http_session* session = (struct http_session*)Session;
 	pthread_mutex_lock(&sessions->lock);
 	++sessions->used;
 	if (sessions->head != NULL) {
@@ -38,9 +38,9 @@ struct tcp_session* http_sessions_add_new(HttpSessions sessions, const struct tc
 	pthread_mutex_unlock(&sessions->lock);
 	return session;
 }
-struct tcp_session* http_sessions_del(HttpSessions sessions, const struct tcp_session* Session)
+struct http_session* http_sessions_del(HttpSessions sessions, const struct http_session* Session)
 {
-	struct tcp_session* session = (struct tcp_session*)Session;
+	struct http_session* session = (struct http_session*)Session;
 	pthread_mutex_lock(&sessions->lock);
 	if (session->prev!=NULL) {
 		session->prev->next = session->next;
