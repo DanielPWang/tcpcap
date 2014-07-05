@@ -32,6 +32,7 @@ enum HTTP_TRANSFER_FLAGS {
 enum HTTP_CONTENT_TYPE { 
 	HTTP_CONTENT_NONE,
 	HTTP_CONTENT_HTML,
+	HTTP_CONTENT_FILE,
 	HTTP_CONTENT_JSCRIPT,
 	HTTP_CONTENT_IMAGE,
 	HTTP_CONTENT_RES,
@@ -55,7 +56,8 @@ enum HTTP_APPEND_STATUS {
 	HTTP_APPEND_ADD_PACKET_LATER,
 	HTTP_APPEND_FINISH_LATER,
 	HTTP_APPEND_FINISH_CURRENT,
-	HTTP_APPEND_SUCCESS
+	HTTP_APPEND_SUCCESS,
+	HTTP_APPEND_REUSE
 };
 
 enum HTTP_SESSION_FINISH_TYPE { 
@@ -83,7 +85,7 @@ int GetHttpData(char **data);
 int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);
 int AppendServerToClient(int nIndex, const char* pPacket);
 int AppendClientToServer(int nIndex, const char* pPacket);
-int AppendReponse(const char* packet);
+int AppendResponse(const char* packet);
 
 #endif
 

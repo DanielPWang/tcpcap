@@ -49,9 +49,6 @@ struct tcp_session
 	struct timeval update;		// the lasttime update. TODO: time_t
 	struct line_t query_url;
 	struct line_t http;
-	struct line_t content_type;
-	struct line_t content_length;
-	struct line_t trans_encoding;
 	void *data;
 	void *lastdata;
 	void *pack_later;

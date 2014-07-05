@@ -175,8 +175,7 @@ void *_process_timeout(void* p)
 
 		for (int index = 0; index < g_nMaxHttpSessionCount; ++index)	{
 			struct tcp_session* session = &_http_session[index];
-			if (session->flag != HTTP_SESSION_IDL && 
-				session->flag != HTTP_SESSION_FINISH) {
+			if ( session->flag < HTTP_SESSION_FINISH ) {
 				if (_http_active-session->update.tv_sec > g_nHttpTimeout) {
 					LOGWARN("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, session->update, g_nHttpTimeout, session->flag);
@@ -209,6 +208,16 @@ int NewHttpSession(const char* packet)
 	int cmdlinen = enter-content;
 	*enter = '\0';
 	LOGTRACE("New http-session: %s", cmdline);
+	//  reuse
+	for (int n=0; n<g_nMaxHttpSessionCount; ++n){
+		struct tcp_session* p = &_http_session[n];
+		if (p->flag >= HTTP_SESSION_FINISH) continue;
+		if (p->client.ip.s_addr == iphead->saddr && p->client.port==tcphead->source){
+			p->flag = HTTP_SESSION_REUSED;
+			push_queue(_whole_content, p);
+			break;
+		}
+	}
 	
 	for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
 		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;	// TODO: ignore
@@ -258,7 +267,13 @@ LOOP_DEBUG:
 	pIDL->next = NULL;
 	pIDL->query_url.content = cmdline;
 	pIDL->query_url.len = cmdlinen;
-	ASSERT (FLOW_GET(packet)!=C2S); 
+	if (FLOW_GET(packet)!=C2S) {
+		char sip[32],dip[32];
+		inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
+		inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
+		LOGERROR("client[%s:%u.%d] maybe server. => [%s:%u]", sip, ntohs(tcphead->source),
+				FLOW_GET(packet), dip, ntohs(tcphead->dest));
+	}
 	LOGTRACE("Session[%d]Start request in NewHttpSession, content= %s", pIDL->index, content);
 	return pIDL->index;
 }
@@ -280,19 +295,30 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 	pSession->res0 = contentlen;
 	pSession->update = *tv;
 
-	if (contentlen == 0) {
-		if (tcphead->rst) {
-			LOGTRACE("Session[%d] be reset.", index);
-			pSession->flag = HTTP_SESSION_RESET;
-			if (contentlen > 0) { LOGERROR("Session[%d].len = %u. droped.", contentlen); }
+	// tcp
+	if (tcphead->rst) {
+		LOGTRACE("Session[%d] be reset.", index);
+		pSession->flag = HTTP_SESSION_RESET;
+		push_queue(_whole_content, pSession);
+		if (contentlen > 0) { LOGERROR("Session[%d].len = %u. droped.", contentlen); }
+		free((void*)pPacket);
+		return HTTP_APPEND_SUCCESS;
+	} else if (tcphead->fin) {
+		pSession->flag = HTTP_SESSION_FINISH;
+		if (contentlen>0) {
+			*(const char**)pPacket = NULL;
+			*(const char**)pSession->lastdata = pPacket;
+			pSession->lastdata = (void*)pPacket;
+		} else {
+			free((void*)pPacket);
 		}
-		free(pPacket);
+		push_queue(_whole_content, pSession);
+		return HTTP_APPEND_SUCCESS;
+	} else if (contentlen == 0) {
+		free((void*)pPacket);
 		return HTTP_APPEND_SUCCESS;
 	}
-	*(const char**)pPacket = NULL;
-	*(const char**)pSession->lastdata = pPacket;
-	pSession->lastdata = (void*)pPacket;
-
+	// http
 	if ((*(unsigned*)content == _http_image)) {
 		pSession->flag = HTTP_SESSION_RESPONSEING;
 		if (pSession->response_head==NULL) {
@@ -330,118 +356,54 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 	}
 	if (pSession->flag==HTTP_SESSION_REPONSE && pSession->response_head != NULL) {
 		strlwr(pSession->response_head);
+		// Process Content-Length and Transfer-Encoding
 		char* content_length = (char*)memmem(pSession->response_head, pSession->response_head_len,
-				Content_Length, sizeof(Content_Length));
-		if (content_length_b == NULL) { LOGINFO0("No Content-Length."); } else {
-			pSession->res1 = strtoul(content_length_b, NULL, 10);
+				Content_Length, sizeof(Content_Length)-1);
+		if (content_length == NULL) { 
+			char* trans_encoding = (char*)memmem(pSession->response_head, pSession->response_head_len,
+					Transfer_Encoding, sizeof(Transfer_Encoding)-1);
+			if (trans_encoding == NULL){
+				LOGERROR("No Content-Length and Transfer-Encoding. \n%s", pSession->response_head); 
+			}
+			pSession->transfer_flag = HTTP_TRANSFER_CHUNKED;
+		} else {
+			pSession->res1 = strtoul(content_length, NULL, 10);
 			ASSERT(pSession->res1 == 0);
 			pSession->transfer_flag = HTTP_TRANSFER_HAVE_CONTENT_LENGTH;
 		}
 		char* content_type = (char*)memmem(pSession->response_head, pSession->response_head_len,
-				Content_Type, sizeof(Content_Type));
+				Content_Type, sizeof(Content_Type)-1);
 		if (content_type==NULL) { LOGINFO0("No Content-Type."); } else {
 			char* lf = strchr(content_type, '\r');
 			uint32_t len = lf==NULL? pSession->response_head_len-(content_type-pSession->response_head):(lf-content_type);
 			char* type = content_type+sizeof(Content_Type)+1;
-			for (int n=0; n < sizeof(_TYPE_CONTENT)/sizeof(_TYPE_CONTENT[0]); ++n){
-				if (memmem(type, len, _TYPE_CONTENT[n].content, _TYPE_CONTENT[n].len)!=NULL) {
-					pSession->content_type = _TYPE_CONTENT[n].type;
+			for (int n=0; n < sizeof(CONTENT_TYPE)/sizeof(CONTENT_TYPE[0]); ++n){
+				if (memmem(type, len, CONTENT_TYPE[n].content, CONTENT_TYPE[n].len)!=NULL) {
+					pSession->content_type = CONTENT_TYPE[n].type;
 					break;
 				}
 			}
 		}
 		// TODO: gzip
+		// end gzip
 		pSession->flag = HTTP_SESSION_REPONSE_ENTITY;
-	}		
-	if (1 == pSession->response_head_recv_flag)
-	{
-				}
-			}
-		}
-		
-		if (HTTP_CONTENT_HTML == pSession->content_type)
-		{
-			char *tmp = NULL;
-			char *pszContentLen = memmem(content, contentlen, "content-length:", 15);
-			if (pszContentLen != NULL) 
-			{
-				pSession->transfer_flag = HTTP_TRANSFER_HAVE_CONTENT_LENGTH;
-				pSession->res1 = strtol(pszContentLen+15, &tmp, 10);
-				LOGDEBUG("Session[%d] Content-Length = %u, content = %s", nIndex, pSession->res1, content);
-				if ((tmp = strstr(content, "\r\n\r\n")) != NULL) 
-				{
-					pSession->res2 = contentlen - (tmp-content) - 4;
-				}
-			}
-			else
-			{
-				char *pszTE = memmem(content, contentlen, "transfer-encoding:", 18);
-				char *pszChunked = memmem(content, contentlen, "chunked", 7);
-				if ((pszTE != NULL) && (pszChunked != NULL))
-				{
-					pSession->transfer_flag = HTTP_TRANSFER_CHUNKED;
-					LOGDEBUG("Session[%d]Transfer-Encoding: chunked, g_nChunked = %d content = %s", nIndex, ++g_nChunked, content);
-				}
-				else
-				{
-					char *pszCode = memmem(content, contentlen, "http/1.1 200", 12);
-					if (pszCode == NULL)
-						pszCode = memmem(content, contentlen, "http/1.0 200", 12);
-					
-					if (pszCode != NULL)
-					{
-						LOGDEBUG("Session[%d]with html end, g_nHtmlEnd=%d content= %s", nIndex, ++g_nHtmlEnd, content);
-						pSession->transfer_flag = HTTP_TRANSFER_WITH_HTML_END;
-
-					}
-					else
-					{
-						LOGDEBUG("Session[%d]with transfer none, g_nNone=%d content= %s", nIndex, ++g_nNone, content);
-						pSession->transfer_flag = HTTP_TRANSFER_NONE;
-					}
-				}
-			}
-		}
-		else if ((HTTP_CONTENT_FILE_PDF == pSession->content_type)
-				 || (HTTP_CONTENT_FILE_KDH == pSession->content_type)
-				 || (HTTP_CONTENT_FILE_CEB == pSession->content_type)
-				 || (HTTP_CONTENT_FILE_OTHER == pSession->content_type))
-		{
-			pSession->content_encoding_gzip = 0;
-			pSession->transfer_flag = HTTP_TRANSFER_FILE;
-			LOGDEBUG("Session[%d] content is file.", nIndex);
-			if (!bIsCurPack)
-				return HTTP_APPEND_FINISH_LATER;
-			
-			pSession->flag = HTTP_SESSION_FINISH;
-			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-			
-			return HTTP_APPEND_FINISH_CURRENT;
-		}
-
-		if (HTTP_TRANSFER_NONE == pSession->transfer_flag)
-		{
-			LOGDEBUG("Session[%d] content is others and not HTTP_TRANSFER_WITH_HTML_END.", nIndex);
-			if (!bIsCurPack)
-				return HTTP_APPEND_FINISH_LATER;
-			
-			pSession->flag = HTTP_SESSION_FINISH;
-			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-			
-			return HTTP_APPEND_FINISH_CURRENT;
-		}
-
-		/*
-		if (pSession->response_head != NULL)
-		{
-			free(pSession->response_head);
-			pSession->response_head = NULL;
-		}
-		*/
+		*(const char**)pPacket = NULL;
+		*(const char**)pSession->lastdata = pPacket;
+		pSession->lastdata = (void*)pPacket;
+		return HTTP_APPEND_SUCCESS;
 	}
-
+	// TODO: if HTTP_CONTENT_FILE, drop packet. 
+	if (pSession->content_type>=HTTP_CONTENT_FILE){
+		// TODO: Content-Length/Transfer-Encoding. HTTP_SESSION_FINISH
+		free((void*)pPacket);
+		return HTTP_APPEND_SUCCESS;
+	} else {
+		*(const char**)pPacket = NULL;
+		*(const char**)pSession->lastdata = pPacket;
+		pSession->lastdata = (void*)pPacket;
+		return HTTP_APPEND_SUCCESS;
+	}
+/**
 	if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == pSession->transfer_flag)
 //		|| HTTP_TRANSFER_NONE == pSession->transfer_flag)
 	{
@@ -457,7 +419,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 			
 			return HTTP_APPEND_FINISH_CURRENT;
 		}
-	}
+	} 
 	else if (HTTP_TRANSFER_CHUNKED == pSession->transfer_flag)
 	{
 		char *pszChunkedEnd = memmem(content, contentlen, "\r\n0\r\n\r\n", 7);
@@ -504,7 +466,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 				return HTTP_APPEND_FINISH_CURRENT;
 			}
 		}
-	}
+	} **/
 
 	return HTTP_APPEND_ADD_PACKET;
 }
@@ -520,58 +482,62 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	const char *content = (void*)tcphead + tcphead->doff*4;
 	struct tcp_session *pSession = &_http_session[nIndex];
 
-	if (pSession->flag != HTTP_SESSION_REQUESTING) 
-		LOGWARN("Resend request or post request. Current flag = %d", pSession->flag);
-
-	if ((pSession->seq+pSession->res0) != tcphead->seq || pSession->ack != tcphead->ack_seq) 
-	{
-		LOGWARN("Session[%d] C->S packet wrong order. pre.seq=%u pre.ack=%u "
-				 "pre.len=%u cur.seq=%u cur.ack=%u cur.len=%u", nIndex,
-				 pSession->seq, pSession->ack, pSession->res0, tcphead->seq, tcphead->ack_seq, contentlen);
-
-		if ((1 == contentlen) && (*content == '\0'))
-		{
-			LOGWARN("Session[%d] AppendClientToServer drop packet, wrong order, contentlen=1, content=empty!", nIndex);
+	// tcp
+	if (tcphead->rst) {
+		LOGTRACE("Session[%d] be reset.", index);
+		pSession->flag = HTTP_SESSION_RESET;
+		push_queue(_whole_content, pSession);
+		if (contentlen > 0) { LOGERROR("Session[%d].len = %u. droped.", contentlen); }
+		free((void*)pPacket);
+		return HTTP_APPEND_SUCCESS;
+	} else if (tcphead->fin) {
+		pSession->flag = HTTP_SESSION_FINISH;
+		if (contentlen>0) {
+			*(const char**)pPacket = NULL;
+			*(const char**)pSession->lastdata = pPacket;
+			pSession->lastdata = (void*)pPacket;
+		} else {
+			free((void*)pPacket);
 		}
-		else
-		{
-			pSession->request_head_len_valid_flag = 1;
-			pSession->seq += contentlen;
-			LOGWARN("Session[%d] AppendClientToServer drop packet, content!=empty!", nIndex);
+		push_queue(_whole_content, pSession);
+		return HTTP_APPEND_SUCCESS;
+	} else if (contentlen == 0) {
+		free((void*)pPacket);
+		return HTTP_APPEND_SUCCESS;
+	}
+	// HTTP
+	if (pSession->flag != HTTP_SESSION_REQUESTING) {
+		if (pSession->flag != HTTP_SESSION_REQUEST) {
+			char sip[32], dip[32];
+			LOGERROR("expect query[%u]. %s:%u.%u.%u -> %s:%u", pSession->flag,
+					inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
+					tcphead->seq, tcphead->ack_seq,
+					inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
+			pSession->flag = HTTP_SESSION_REUSED;
+			push_queue(_whole_content, pSession);
+			return HTTP_APPEND_REUSE;
+		} else {
+			if (*(uint32_t*)pSession->query_url.content != _post_image) {
+				char* tmp = (char*)alloca(pSession->query_url.len+1);
+				memcpy(tmp, pSession->query_url.content, pSession->query_url.len+1);
+				tmp[pSession->query_url.len] = '\0';
+				LOGWARN("? [%s]. Current flag = %u", tmp, pSession->flag);
+			}
 		}
-		return HTTP_APPEND_DROP_PACKET;
+	}
+	if (memmem(content, contentlen, "\r\n\r\n", 4)!=NULL) {
+		pSession->flag = HTTP_SESSION_REQUEST;
 	}
 
-	LOGINFO("Session[%d] AppendClientToServer content=%s", nIndex, content);
-
-	if ((1 == contentlen) && (*content == '\0'))
-	{
-		LOGWARN("Session[%d] AppendClientToServer drop packet, contentlen=1, content=empty!", nIndex);
-		return HTTP_APPEND_DROP_PACKET;
-	}
-
-	pSession->ack = tcphead->ack_seq;
 	pSession->seq = tcphead->seq;
+	pSession->ack = tcphead->ack_seq;
 	pSession->res0 = contentlen;
 	pSession->update = *tv;
-
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
 	pSession->lastdata = (void*)pPacket;
 
-	int last_len = pSession->request_head_len;
-	pSession->request_head = realloc(pSession->request_head, last_len + contentlen);
-	memcpy(pSession->request_head+last_len-1, content, contentlen);
-	pSession->request_head[last_len+contentlen-1] = '\0';
-	pSession->request_head_len = last_len + contentlen;
-
-	if (content[contentlen-4]=='\r' && content[contentlen-3]=='\n'
-		&& content[contentlen-2]=='\r' && content[contentlen-1]=='\n') 
-	{
-		pSession->flag = HTTP_SESSION_REQUEST;
-	}
-
-	return HTTP_APPEND_ADD_PACKET;
+	return HTTP_APPEND_SUCCESS;
 }
 
 int AppendLaterPacket(int nIndex)
@@ -638,60 +604,49 @@ int AppendLaterPacket(int nIndex)
 	return 0;
 }
 
-int AppendReponse(const char* packet, int bIsCurPack)
+int AppendResponse(const char* packet)
 {
 	struct timeval *tv = (struct timeval*)packet;
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	struct tcp_session *pREQ = &_http_session[0];
+	unsigned contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
+	char *content = (void*)tcphead + tcphead->doff*4;
+	if (contentlen==0 && !tcphead->fin && !tcphead->rst) {
+		free((void*)packet);
+		return HTTP_APPEND_SUCCESS;
+	}
 	int flow = FLOW_GET(packet);
 
 	int index = 0;
 	for (; index < g_nMaxHttpSessionCount; ++index) // TODO: MAX_HTTP_SESSION
 	{
 		pREQ = &_http_session[index];
-		if (pREQ->flag == HTTP_SESSION_IDL || pREQ->flag == HTTP_SESSION_FINISH) 
-			continue;
+		if (pREQ->flag == HTTP_SESSION_IDL || pREQ->flag >= HTTP_SESSION_FINISH) continue;
 
 		int nRs = 0;
 		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
-			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) // server -> client
-		{
-			ASSERT(FLOW_GET() == S2C);
+			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) {
+			// server -> client
+			ASSERT(FLOW_GET(packet) == S2C);
 			nRs = AppendServerToClient(index, packet);
-			if (nRs == HTTP_APPEND_ADD_PACKET || nRs == HTTP_APPEND_ADD_PACKET_LATER) {
-				AppendLaterPacket(index);
-			}
-			else if (nRs == HTTP_APPEND_DROP_PACKET)
-				return nRs;	
-			
 			break;
 		}
-		else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source // client -> server
-				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) 
-		{ 
+		else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source 
+				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) { 
+			// client -> server
 			nRs = AppendClientToServer(index, packet);
-			if (nRs == HTTP_APPEND_DROP_PACKET)
-				return nRs;	
-			
 			break;
 		} 
-		else 
-		{
-			char sip[20], dip[20], stip[20], dtip[20];
-			LOGTRACE("Session[%d] %s:%d => %s:%d. append %s:%d => %s:%d", index,
-					inet_ntop(AF_INET, &pREQ->client.ip, sip, 20), ntohs(pREQ->client.port),
-					inet_ntop(AF_INET, &pREQ->server.ip, dip, 20), ntohs(pREQ->server.port),
-					inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
-					inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest));
-		}
 	}
 	if (index == g_nMaxHttpSessionCount) 
 	{
 		char sip[20], dip[20], stip[20], dtip[20];
-		LOGTRACE("Session[%d]  append %s:%d => %s:%d", index,
+		LOGINFO("packet drop. %s:%d.%u.%u => %s:%d\n%s", 
 				inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
-				inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest));
+				tcphead->seq, tcphead->ack_seq,
+				inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest),
+				content);
 		
 		index = HTTP_APPEND_DROP_PACKET;
 	}
@@ -743,11 +698,9 @@ void *HTTP_Thread(void* param)
 			continue;
 		}
 
-		int nIndex = AppendReponse(packet, 1);
-		if (nIndex == HTTP_APPEND_DROP_PACKET) 
-		{
-			LOGDEBUG0("cannt find request with reponse.");
-			free((void*)packet);
+		int nIndex = AppendResponse(packet);
+		if (nIndex == HTTP_APPEND_DROP_PACKET) {
+			LOGDEBUG0("cannt find session");
 		}
 	}
 	printf("Exit http thread.\n");
@@ -812,8 +765,8 @@ int HttpInit()
 	ASSERT(_working_session != NULL);
 	int err = pthread_rwlock_init(&_working_session_lock, NULL);
 	ASSERT(err == 0);
-	err = http_sessions_init();
-	ASSERT(err == 0);
+	//err = http_sessions_init();
+	//ASSERT(err == 0);
 	//_use_session = init_queue(g_nMaxHttpSessionCount);
 	//ASSERT(_use_session != NULL);
 
@@ -1028,13 +981,12 @@ int GetHttpData(char **data)
 	
 	INC_WHOLE_HTML_SESSION;
 	
-	if (pSession->flag != HTTP_SESSION_FINISH) {
+	if (pSession->flag < HTTP_SESSION_FINISH) {
 		LOGFATAL("Session.flag=%d. want HTTP_SESSION_FINISH", pSession->flag);
 		CleanHttpSession(pSession);
 		return 0;
 	}
 	size_t http_len = 0;
-	ASSERT(pSession->flag == HTTP_SESSION_FINISH);
 	assert(pSession->data != NULL);
 
 	// get all http_content len
