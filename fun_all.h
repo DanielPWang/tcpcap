@@ -9,6 +9,7 @@
 #include <time.h>
 
 enum FLOWDIR {
+	NONE,
 	C2S,
 	S2C
 };

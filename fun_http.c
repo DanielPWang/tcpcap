@@ -122,7 +122,7 @@ struct http_session* CleanHttpSession(struct http_session* pSession)
 {
 	LOGDEBUG("Session[%d] start clean!", pSession->index);
 	
-	if (pSession->flag != HTTP_SESSION_IDL) 
+	//if (pSession->flag != HTTP_SESSION_IDL) 
 	{
 		unsigned index = pSession->index;
 		void* packet = pSession->data;
@@ -133,7 +133,7 @@ struct http_session* CleanHttpSession(struct http_session* pSession)
 			free(tmp);
 		}
 
-		LOGDEBUG("Session[%d] clean packet data successfully!", pSession->index);
+		LOGTRACE("Session[%d] clean packet data successfully!", pSession->index);
 		
 		packet = pSession->pack_later;
 		while (packet!=NULL)
@@ -143,20 +143,20 @@ struct http_session* CleanHttpSession(struct http_session* pSession)
 			free(tmp);
 		}
 
-		LOGDEBUG("Session[%d] clean packet_later data successfully!", pSession->index);
+		LOGTRACE("Session[%d] clean packet_later data successfully!", pSession->index);
 		
-		//if (pSession->request_head!=NULL) { free(pSession->request_head); pSession->request_head = NULL; }
+		if (pSession->request_head!=NULL) { free(pSession->request_head);}
 
-		//if (pSession->response_head!=NULL) { free(pSession->response_head); pSession->response_head = NULL; }
+		if (pSession->response_head!=NULL) { free(pSession->response_head);}
 		// TODO: add by jrl why?
 		//if (pSession->cur_content!=NULL) { free(pSession->cur_content); pSession->cur_content = NULL; }
 		
 		//if (pSession->part_content!=NULL) { free(pSession->part_content); pSession->part_content = NULL; }
 		// END
 		
-		LOGDEBUG("Session[%d] clean response_head successfully!", pSession->index);
+		LOGTRACE("Session[%d] clean response_head successfully!", pSession->index);
 		
-		memset(pSession, 0, sizeof(*pSession));
+		bzero(pSession, sizeof(*pSession));
 		pSession->index = index;
 		pSession->flag = HTTP_SESSION_IDL;
 		
@@ -257,8 +257,7 @@ LOOP_DEBUG:
 			&& content[contentlen-4]=='\r' && content[contentlen-3]=='\n'
 			&& content[contentlen-2]=='\r' && content[contentlen-1]=='\n') {
 		pIDL->flag = HTTP_SESSION_REQUEST;
-	}
-	if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug. maybe not complete
+	} else if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug. maybe not complete
 		pIDL->flag = HTTP_SESSION_REQUEST;
 	}
 
@@ -274,7 +273,7 @@ LOOP_DEBUG:
 		LOGERROR("client[%s:%u.%d] maybe server. => [%s:%u]", sip, ntohs(tcphead->source),
 				FLOW_GET(packet), dip, ntohs(tcphead->dest));
 	}
-	LOGTRACE("Session[%d] NewHttpSession, content= %s", pIDL->index, content);
+	LOGTRACE("Session[%d] NewHttpSession", pIDL->index);
 	return pIDL->index;
 }
 
@@ -515,13 +514,14 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 					inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
 			pSession->flag = HTTP_SESSION_REUSED;
 			push_queue(_whole_content, pSession);
+			free((void*)pPacket);
 			return HTTP_APPEND_REUSE;
 		} else {
 			if (*(uint32_t*)pSession->query_url.content != _post_image) {
 				char* tmp = (char*)alloca(pSession->query_url.len+1);
 				memcpy(tmp, pSession->query_url.content, pSession->query_url.len+1);
 				tmp[pSession->query_url.len] = '\0';
-				LOGWARN("? [%s]. Current flag = %u", tmp, pSession->flag);
+				LOGERROR("? [%s]. Current flag = %u", tmp, pSession->flag);
 			}
 		}
 	}
@@ -628,13 +628,28 @@ int AppendResponse(const char* packet)
 		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
 			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) {
 			// server -> client
-			ASSERT(FLOW_GET(packet) == S2C);
+			if (FLOW_GET(packet)!=S2C) {
+				char sip[32],dip[32];
+				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
+				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
+				LOGERROR("server[%s:%u.%u.%u.%u] maybe client. => [%s:%u]", sip, 
+						ntohs(tcphead->source), tcphead->seq, tcphead->ack_seq,
+					FLOW_GET(packet), dip, ntohs(tcphead->dest));
+			}
 			nRs = AppendServerToClient(index, packet);
 			break;
 		}
 		else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source 
 				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) { 
 			// client -> server
+			if (FLOW_GET(packet)!=C2S) {
+				char sip[32],dip[32];
+				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
+				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
+				LOGERROR("client[%s:%u.%d.%u.%u] maybe server. => [%s:%u]", sip, 
+						ntohs(tcphead->source), tcphead->seq, tcphead->ack_seq,
+					FLOW_GET(packet), dip, ntohs(tcphead->dest));
+			}
 			nRs = AppendClientToServer(index, packet);
 			break;
 		} 
@@ -673,12 +688,12 @@ void *HTTP_Thread(void* param)
 			continue; 
 		} 
 		char *content = (void*)tcphead + tcphead->doff*4;
-		// TMP
+		// ntohl
 		tcphead->seq = ntohl(tcphead->seq);
 		tcphead->ack_seq = ntohl(tcphead->ack_seq);
 
 		unsigned *cmd = (unsigned*)content;
-		if (*cmd == _get_image || *cmd == _post_image) {	// TODO: bug
+		if ((*cmd == _get_image || *cmd == _post_image) && contentlen>0) {	// TODO: bug
 			// TODO: need to process RST and FIN
 			int nRes = NewHttpSession(packet);
 			if (nRes == -1) {
@@ -1084,8 +1099,7 @@ int GetHttpData(char **data)
 	if (*(unsigned*)HTTP == _get_image) 
 	{
 		HTTP = strstr(HTTP, "\r\n\r\n");	// skip query
-		if (HTTP != NULL)
-			HTTP += 4;
+		if (HTTP != NULL) HTTP += 4;
 	} else if (*(unsigned*)HTTP == _post_image) {
 		char* query_len = strstr(HTTP, "Content-Length:");
 		int query_length = 0;
