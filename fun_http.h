@@ -26,7 +26,15 @@ enum HTTP_TRANSFER_FLAGS {
 	HTTP_TRANSFER_HAVE_CONTENT_LENGTH, 
 	HTTP_TRANSFER_CHUNKED,
 	HTTP_TRANSFER_WITH_HTML_END,
-	HTTP_TRANSFER_FILE
+	HTTP_TRANSFER_FILE,
+	HTTP_TRANSFER_OTHER
+};
+
+enum HTTP_CONTENT_ENCODING {
+	HTTP_CONTENT_ENCODING_NONE,
+	HTTP_CONTENT_ENCODING_GZIP,
+	HTTP_CONTENT_ENCODING_COMPRESS,
+	HTTP_CONTENT_ENCODING_DEFLATE
 };
 
 enum HTTP_CONTENT_TYPE { 
@@ -82,7 +90,7 @@ int HttpStop();
 int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
-int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);
+uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);
 int AppendServerToClient(int nIndex, const char* pPacket);
 int AppendClientToServer(int nIndex, const char* pPacket);
 int AppendResponse(const char* packet);

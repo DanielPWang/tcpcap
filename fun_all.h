@@ -34,7 +34,7 @@ struct http_session
 	uint32_t ack;		// client
 	uint32_t transfer_flag;
 	uint32_t response_head_recv_flag;  // 1:recv ok; 0:default
-	uint32_t content_encoding_gzip;	   // 1:gzip; 0:no encoding
+	uint32_t content_encoding;	   // 1:gzip; 0:no encoding
 	uint32_t content_type;			   // 0:no match; 1:html; 2:file
 	uint32_t finish_type;
 	uint32_t force_restore_flag;
@@ -82,8 +82,10 @@ void* LoadHost(char* hostsbuff);
 #define IPHDR(packet) (struct iphdr*)((void*)(packet) + ((((struct ether_header*)(packet))->ether_type == htons(ETHERTYPE_IP)) ? ETHER_HDR_LEN : (ETHER_HDR_LEN+4)))
 #define TCPHDR(ippacket) (struct tcphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
 #define UDPHDR(ippacket) (struct udphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
-#define FLOW_SET(packet, x) (*(char*)(((void*)packet)+sizeof(struct timeval)) = (x))
-#define FLOW_GET(packet) (*(char*)(((void*)packet)+sizeof(struct timeval)))
+#define FLOW_SET0(packet, x) (*(char*)(((void*)packet)+sizeof(struct timeval)) = (x))
+#define FLOW_GET0(packet) (*(char*)(((void*)packet)+sizeof(struct timeval)))
+#define FLOW_SET(packet, x) (((struct tcphdr*)tcphead)->res2 = (x))
+#define FLOW_GET(packet) (tcphead->res2)
 
 #endif
 

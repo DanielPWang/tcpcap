@@ -219,7 +219,7 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	pIDL->res2 = 0;
 	pIDL->transfer_flag = HTTP_TRANSFER_INIT;
 	pIDL->response_head_recv_flag = 0;
-	pIDL->content_encoding_gzip = 0;
+	pIDL->content_encoding = HTTP_CONTENT_ENCODING_NONE;
 	pIDL->content_type = HTTP_CONTENT_NONE;
 	pIDL->response_head = NULL;
 	pIDL->response_head_gen_time = 0;
@@ -377,21 +377,25 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		// Process Content-Length and Transfer-Encoding
 		char* content_length = (char*)memmem(pSession->response_head, pSession->response_head_len,
 				Content_Length, sizeof(Content_Length)-1);
-		if (content_length == NULL) { 
+		if (content_length == NULL) {	// Transfer-Encoding: Chunked
 			char* trans_encoding = (char*)memmem(pSession->response_head, pSession->response_head_len,
 					Transfer_Encoding, sizeof(Transfer_Encoding)-1);
-			if (trans_encoding == NULL){
-				LOGERROR("No Content-Length and Transfer-Encoding. \n%s", pSession->response_head); 
+			if (trans_encoding == NULL){	// 304 or ...
+				LOGINFO("No Content-Length and Transfer-Encoding. \n%s", pSession->response_head); 
+				pSession->transfer_flag = HTTP_TRANSFER_OTHER;
+			} else {
+				pSession->transfer_flag = HTTP_TRANSFER_CHUNKED;
 			}
-			pSession->transfer_flag = HTTP_TRANSFER_CHUNKED;
-		} else {
+		} else {	// Content-Length
 			pSession->http_content_length = strtoul(content_length, NULL, 10);
 			ASSERT(pSession->http_content_length == 0);
 			pSession->transfer_flag = HTTP_TRANSFER_HAVE_CONTENT_LENGTH;
 		}
 		char* content_type = (char*)memmem(pSession->response_head, pSession->response_head_len,
 				Content_Type, sizeof(Content_Type)-1);
-		if (content_type==NULL) { LOGINFO0("No Content-Type."); } else {
+		if (content_type==NULL) { 
+			LOGDEBUG0("No Content-Type."); 
+		} else {
 			char* lf = strchr(content_type, '\r');
 			uint32_t len = lf==NULL? pSession->response_head_len-(content_type-pSession->response_head):(lf-content_type);
 			char* type = content_type+sizeof(Content_Type)+1;
@@ -401,6 +405,17 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 					break;
 				}
 			}
+		}
+		char* content_encoding = (char*)memmem(pSession->response_head, pSession->response_head_len,
+				Content_Encoding, sizeof(Content_Encoding)-1);
+		if (content_encoding == NULL) { LOGDEBUG0("No Content-Encoding."); } else {
+			char *type = content_encoding+sizeof(Content_Encoding)+1;
+			if (memmem(type, 10, "gzip", 4) != NULL)
+				pSession->content_encoding = HTTP_CONTENT_ENCODING_GZIP;
+			else if (memmem(type, 10, "deflate", 7) != NULL)
+				pSession->content_encoding = HTTP_CONTENT_ENCODING_DEFLATE;
+			else 
+				pSession->content_encoding = HTTP_CONTENT_ENCODING_COMPRESS;
 		}
 		// TODO: gzip
 		// end gzip
@@ -443,70 +458,6 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 			pSession->lastdata = (void*)pPacket;
 			return HTTP_APPEND_SUCCESS;
 	}
-/**
-	if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == pSession->transfer_flag)
-//		|| HTTP_TRANSFER_NONE == pSession->transfer_flag)
-	{
-		if (pSession->res2 >= pSession->http_content_length) 
-		{
-			LOGDEBUG("Session[%d] end_reponse content-length/recv = %u/%u, content= %s", nIndex, pSession->http_content_length, pSession->res2, content);
-			if (!bIsCurPack)
-				return HTTP_APPEND_FINISH_LATER;
-			
-			pSession->flag = HTTP_SESSION_FINISH;
-			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-			
-			return HTTP_APPEND_FINISH_CURRENT;
-		}
-	} 
-	else if (HTTP_TRANSFER_CHUNKED == pSession->transfer_flag)
-	{
-		char *pszChunkedEnd = memmem(content, contentlen, "\r\n0\r\n\r\n", 7);
-		if (pszChunkedEnd != NULL)
-		{
-			LOGDEBUG("Session[%d]end_reponse with chunked data", nIndex);
-			if (!bIsCurPack)
-				return HTTP_APPEND_FINISH_LATER;
-			
-			pSession->flag = HTTP_SESSION_FINISH;
-			if (push_queue(_whole_content, pSession) < 0)
-				LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-			
-			return HTTP_APPEND_FINISH_CURRENT;
-		}
-	}
-	else if (HTTP_TRANSFER_WITH_HTML_END == pSession->transfer_flag)
-	{
-		char *pszHtmlEnd = memmem(content, contentlen, "</html>", 7);
-		if (pszHtmlEnd == NULL)
-		{
-			pszHtmlEnd = memmem(content, contentlen, "</Html>", 7);
-			if (pszHtmlEnd == NULL)
-				pszHtmlEnd = memmem(content, contentlen, "</HTML>", 7);
-		}
-		
-		if (pszHtmlEnd != NULL)
-		{
-			LOGDEBUG("Session[%d] find </html>, content=%s", nIndex, content);
-			int nLeft = contentlen - (pszHtmlEnd-content+7);
-			if (((pszHtmlEnd-content+7) == contentlen)
-				|| ((nLeft >= 6) && (memmem(pszHtmlEnd+7, 6, "\r\n\r\n", 4) != NULL || memmem(pszHtmlEnd+7, 6, "\n\n", 2) != NULL))
-				|| (memmem(pszHtmlEnd+7, nLeft, "<", 1) == NULL
-					&& memmem(pszHtmlEnd+7, nLeft, ">", 1) == NULL))
-			{
-				LOGDEBUG("Session[%d]end_reponse with </html>, left length=%d", nIndex, nLeft);
-				if (!bIsCurPack)
-					return HTTP_APPEND_FINISH_LATER;
-				
-				pSession->flag = HTTP_SESSION_FINISH;
-				if (push_queue(_whole_content, pSession) < 0)
-					LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-				
-				return HTTP_APPEND_FINISH_CURRENT;
-			}
-		}
-	} **/
 
 	return HTTP_APPEND_ADD_PACKET;
 }
@@ -912,113 +863,57 @@ int LoadHttpConf(const char* filename)
 	return 0;
 }
 
-int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
+///////////// gzip
+static void* out = NULL;
+static uint32_t outlen = 0u;
+#define MAX_OUT_LEN (10*1024*1024-64)
+uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 {	// TODO: gzip 
-	if (pGzipData == NULL)
-		return -1;
+	if (pGzipData == NULL) return 0;
+	if (out==NULL) {
+		out = malloc(MAX_OUT_LEN);
+		outlen = MAX_OUT_LEN;
+		ASSERT(out != NULL);
+	}
 	
 	*pTransData = NULL;
-	int plain_len = *(int*)(pGzipData+nDataLen-4);
-	
+	uint32_t plain_len = *(uint32_t*)(pGzipData+nDataLen-4);
 	LOGDEBUG("TransGzipData, content length = %d, plain length = %d", nDataLen, plain_len);
+	if (plain_len > MAX_OUT_LEN) {
+		LOGERROR("%u properly error. try...", plain_len);
+	}
+	if (nDataLen > plain_len) {
+		LOGERROR("%u/%u properly error. try...", nDataLen, plain_len);
+	}
 	
-	char *pPlain = NULL;
+	uint32_t have;
+	z_stream strm = {0};
+	int err = inflateInit2(&strm, 47);
+	if (err != Z_OK) return 0;
 
-	if (plain_len > 0 && plain_len < 10000000)
-	{
-		if (nDataLen > plain_len)
-		{
-			LOGWARN0("TransGzipData, content length > plain length, trans stop!");
-			return -1;
-		}
-		
-		pPlain = calloc(1, plain_len+1024);
-	}
-	else if (0 == plain_len)
-	{ // TODO: check old. 
-		if (nDataLen > 0 && nDataLen < 800000)
-		{
-			pPlain = calloc(1, 5120);
-			plain_len = -1;
-		}
-		else
-		{
-			LOGWARN0("TransGzipData, plain length = 0 and plain length >= 800KB, trans stop!");
-			return -1;
-		}
-	}
-	else
-	{
-		LOGWARN0("TransGzipData, plain length < 0 or plain length >= 10M, trans stop!");
-		return -1;
-	}
-	
-	if (pPlain == NULL) {
-		LOGWARN0("cannt calloc plain!");
-		return -1;
-	}
+	strm.avail_in = nDataLen;
+	strm.next_in = (void*)pGzipData;
+	strm.avail_out = MAX_OUT_LEN;
+	strm.next_out = out;
 
-	char gzfile[] = "/dev/shm/gzipXXXXXX";
-	int fd = mkstemp(gzfile);
-	if (fd == -1) {
-		LOGERROR("mkstemp() failed. %s", strerror(errno));
-		free(pPlain);
-		pPlain = NULL;
-		return -1;
+	err = inflate(&strm, Z_FINISH);
+	have = MAX_OUT_LEN-strm.avail_out;
+	plain_len = have;
+	if (err == Z_STREAM_END) { // greate!
+		LOGDEBUG0("Hallelujah!");
+	} else if (err == Z_OK) {
+		LOGERROR0("Need more memory. too big.");
+	} else {
+		LOGERROR("inflate=%d", err);
 	}
-	int nWrited = 0;
-	do {
-		int n = write(fd, pGzipData+nWrited, nDataLen-nWrited);
-		if (n == -1) {
-			LOGERROR("write tmp.gz failed. %s", strerror(errno));
-			free(pPlain);
-			pPlain = NULL;
-			close(fd);
-			unlink(gzfile);
-			return -1;
-		}
-		nWrited += n;
-	}while (nWrited < nDataLen);
-	close(fd);
-
-	gzFile p = gzopen(gzfile, "r");
-	int nReaded = 0;
-	int n = 0;
-	if (plain_len > 0)
-	{
-		while (!gzeof(p)) {
-			n = gzread(p, pPlain+nReaded, plain_len+1024-nReaded);
-			if (n == -1) {
-				LOGERROR("gzread() return -1. %s", strerror(errno));
-				break;
-			}
-			nReaded += n;
-			if (nReaded > plain_len) {
-				LOGERROR("gzread() return more than plain_len, read data length = %d, plain length = %d", nReaded, plain_len);
-				break;
-			}
-		}
+	if (plain_len > 0) {
+		*pTransData = malloc(plain_len+1);
+		memcpy(*pTransData, out, plain_len);
+		(*pTransData)[plain_len] = '\0';
 	}
-	else
-	{
-		while (!gzeof(p)) {
-			n = gzread(p, pPlain+nReaded, 5120);
-			LOGDEBUG("gzread() return %d", n);
-			if (n == -1) {
-				LOGERROR("gzread() return -1. %s", strerror(errno));
-				break;
-			}
-			nReaded += n;
-			pPlain = realloc(pPlain, nReaded + 5120);
-		}
-	}
+	inflateEnd(&strm);
 	
-	gzclose(p);
-	unlink(gzfile);
-	LOGDEBUG("TransGzipData finish. Read data length = %d, plain length = %d", nReaded, plain_len);
-	
-	*pTransData = pPlain;
-	return nReaded;
+	return plain_len;
 }
 
 int GetHttpData(char **data)
@@ -1081,8 +976,9 @@ int GetHttpData(char **data)
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		const char *content = (void*)tcphead + tcphead->doff*4;
 		if (*(uint32_t*)content!=_get_image && *(uint32_t*)content!=_post_image) {
+			// not GET or POST
 			char sip[32],dip[32];
-			LOGERROR("not GET and POST. session[%u] %s:%u.%u.%u -> %s:%u", pSession->index, 
+			LOGINFO("not GET and POST. session[%u] %s:%u.%u.%u -> %s:%u", pSession->index, 
 					inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
 					tcphead->seq, tcphead->ack_seq,
 					inet_ntop(AF_INET, &iphead->daddr, dip,322), ntohs(tcphead->dest));
@@ -1107,25 +1003,6 @@ int GetHttpData(char **data)
 	http_content[pos] = '\0';
 	ASSERT(pos+1 == data_len);
 
-	/*
-	FILE* pf;
-	int nwrite, n;
-
-	// sent for debug
-	pf = fopen("sent.txt", "a+b");
-	nwrite = 0;
-	do {
-		n = fwrite(http_content+nwrite, 1, data_len-nwrite, pf);
-		if (n<1) {
-			perror("Error in writing sent.txt");
-			break;
-		}
-		nwrite += n;
-	} while (nwrite < data_len);
-	fprintf(pf, "\n===================[%d]==%d=========\n", data_len, nwrite);
-	fclose(pf); 
-	*/
-	
 	// proce http
 	char* HTTP = http_content+35+10+26+26+5;
 	char* HTTP_PRE = HTTP;
@@ -1148,231 +1025,97 @@ int GetHttpData(char **data)
 				HTTP = HTTP_pre + pSession->request_head_len - 1;
 			}
 		}
-	} else {
+	} else { // TODO: imcomplete data
 		LOGERROR("No GET or POST. [%u]%s", pSession->index, HTTP_PRE);
+		goto ERROR_EXIT;
 	}
 	
 	if (HTTP == NULL) {
 		LOGERROR0("Not http!!!!! cannt get here!!!.");
-		CleanHttpSession(pSession);
-		free(http_content);
-		return 0;
+		goto ERROR_EXIT;
 	}
 
 	if ((HTTP - http_content) >= data_len) {
 		LOGWARN("Session[%d] Address more than data length. Current content= %s", pSession->index, HTTP_PRE);
-		CleanHttpSession(pSession);
-		free(http_content);
-		return 0;
+		goto ERROR_EXIT;
 	}
 	
 	LOGDEBUG("Session[%d] ready to get data", pSession->index);
-	if ((pSession->content_type != HTTP_CONTENT_NONE)
-		|| (HTTP_TRANSFER_WITH_HTML_END == transfer_flag))
-	{
+	if ((pSession->content_type != HTTP_CONTENT_NONE) || (HTTP_TRANSFER_WITH_HTML_END == transfer_flag)) {
 		// get http code
-		char* http_code = strstr(HTTP, "HTTP/1.0 ");
-		if (NULL == http_code)
-			http_code = strstr(HTTP, "HTTP/1.1 ");
+		char* http_code = strstr(HTTP, "HTTP/1.1 ");
+		if (NULL == http_code) http_code = strstr(HTTP, "HTTP/1.0 ");
 		
-		if (NULL == http_code)
-		{
-			LOGWARN("Session[%d] has not HTTP/1.0 or HTTP/1.1, Current content= %s", pSession->index, HTTP_PRE);
-			CleanHttpSession(pSession);
-			free(http_content);
-			return 0;
+		if (NULL == http_code) {
+			LOGERROR("Session[%d] NO HTTP/1.0 or HTTP/1.1. Content= %s", pSession->index, HTTP_PRE);
+			goto ERROR_EXIT;
 		}
 
 		http_code += 9;
 		int nHttpcode = strtol(http_code, NULL, 10);
-		if ((0 == g_nSendErrStateDataFlag) && (nHttpcode >= 404))
-		{
-			LOGDEBUG("Session[%d] httpcode=%d, Do not send current content.", pSession->index, nHttpcode);
-			CleanHttpSession(pSession);
-			free(http_content);
-			return 0;
-		}
-
+		// TODO: may be process 4xx 5xx
 		sprintf(http_content+35, "STATE=%03d", nHttpcode);
 		LOGDEBUG("Session[%d] get data httpcode=%d, transfer_flag=%d", pSession->index, nHttpcode, transfer_flag);
 		
 		int nContentLength = 0;
-		if (HTTP_TRANSFER_CHUNKED == transfer_flag)
-		{
-			char* pOldContent = strstr(HTTP, "\r\n\r\n");
-			if (pOldContent == NULL)
-			{
-				LOGWARN("Session[%d] has not content_TRANSFER_CHUNKED, Current content= %s", pSession->index, HTTP_PRE);
-				goto NOZIP;
-			}
-			pOldContent += 4;
-			
-			char* pTmpContent = pOldContent;
-			while (pTmpContent < http_content+data_len)
-			{	// TODO: Proc chunk
-				int nChunkLen = strtol(pTmpContent, NULL, 16);
-				if (nChunkLen > 0)
-				{
-					pTmpContent = strstr(pTmpContent, "\r\n");
-					if (pTmpContent != NULL)
-					{
-						nContentLength += nChunkLen;
-						pTmpContent += 2+nChunkLen+2;
-					}
-					else
-					{
-						nContentLength = 0;
-						break;
-					}
-				}
-				else if (nChunkLen == 0)
-				{
-					pTmpContent = strstr(pTmpContent, "\r\n\r\n");
-					if (pTmpContent == NULL)
-					{
-						LOGWARN("Session[%d] fail to get end of chunk data. nContentLength=%d", pSession->index, nContentLength);
-						nContentLength = 0;
-					}
-					
-					break;
-				}
-				else
-				{
-					LOGWARN("Session[%d] get chunk size <0 nChunkLen=%d", pSession->index, nChunkLen);
-					nContentLength = 0;
-					break;
-				}
-			}
-
-			LOGDEBUG("Calculate the chunk size = %d", nContentLength);
-			if (pTmpContent >= http_content+data_len)
-			{
-				nContentLength = 0;
-				LOGERROR("Session[%d] fail to calculate the chunk size!", pSession->index);
-			}
-				
-			if (nContentLength > 0)
-			{
-				data_len = (pOldContent-http_content)+nContentLength+1;
-				char* pChunkContent = calloc(1, data_len);
-				if (pChunkContent == NULL)
-					goto NOZIP;
-
-				int nRespStartPos = HTTP - http_content;
-				int nOffset = pOldContent-http_content;
-				memcpy(pChunkContent, http_content, nOffset);	
-
-				pTmpContent = pOldContent;
-				while (pTmpContent < http_content+data_len)
-				{
-					int nChunkLen = strtol(pTmpContent, NULL, 16);
-					if (nChunkLen > 0)
-					{
-						pTmpContent = strstr(pTmpContent, "\r\n");
-						memcpy(pChunkContent+nOffset, pTmpContent+2, nChunkLen);
-						pTmpContent += 2+nChunkLen+2;
-						nOffset += nChunkLen;
-					}
-					else if (nChunkLen == 0)
-						break;
-				}
-
-				pChunkContent[nOffset] = '\0';
-				free(http_content);
-				http_content = pChunkContent;
-				HTTP = http_content + nRespStartPos;
-			}
-		} 
-		else if (HTTP_TRANSFER_WITH_HTML_END == transfer_flag)
-		{
-			char* pTmpContent = strstr(HTTP, "\r\n\r\n");
-			if (pTmpContent == NULL)
-			{
-				LOGWARN("Session[%d] has not content_HTML_END, current content = %s", pSession->index, HTTP_PRE);
-				goto NOZIP;
-			}
-			pTmpContent += 4;
-			
-			char *pszHtmlEnd = strstr(HTTP, "</html>");
-			if (pszHtmlEnd == NULL)
-			{
-				pszHtmlEnd = strstr(HTTP, "</Html>");
-				if (pszHtmlEnd == NULL)
-					pszHtmlEnd = strstr(HTTP, "</HTML>");
-			}
-			
-			if (pszHtmlEnd != NULL)
-			{
-				pszHtmlEnd += 7;
-				nContentLength = pszHtmlEnd - pTmpContent;
-			}
-			LOGDEBUG("The content length of content with html end is %d", nContentLength);
-		}
-		else if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == transfer_flag)
-		{
-			nContentLength = pSession->http_content_length;
-		}
-		else if (HTTP_TRANSFER_FILE == transfer_flag)
-		{
-			char* pOldContent = strstr(HTTP, "\r\n\r\n");
-			if (pOldContent == NULL)
-			{
-				LOGWARN("Session[%d] has not content_TRANSFER_FILE, current content = %s", pSession->index, HTTP_PRE);
-				goto NOZIP;
-			}
-			pOldContent += 4;
-
-			char szEmptyHtml[100] = {0};
-			if (HTTP_CONTENT_FILE <= pSession->content_type)
-				strcpy(szEmptyHtml, "<html><head><title>a file</title></head><body></body></html>\r\n");
-			
-			nContentLength = strlen(szEmptyHtml);
-			data_len = (pOldContent-http_content)+nContentLength+1;
-			char* pFileContent = calloc(1, data_len);
-			if (pFileContent == NULL)
-				goto NOZIP;
-
-			int nRespStartPos = HTTP - http_content;
-			int nOffset = pOldContent - http_content;
-			memcpy(pFileContent, http_content, nOffset);	
-			memcpy(pFileContent+nOffset, szEmptyHtml, nContentLength);
-			pFileContent[nOffset+nContentLength] = '\0';
-			free(http_content);
-			http_content = pFileContent;
-			HTTP = http_content + nRespStartPos;
-			nContentLength = data_len;
-		}
-
-		LOGDEBUG("Session[%d] get data nContentLength=%d", pSession->index, nContentLength);
-		
-		if (nContentLength == 0) 
-		{
-			// LOGWARN("Session[%d] has not content-Length or is 0, current content = %s", pSession->index, HTTP);
-			goto NOZIP;
-		}
-		
-		char* content = strstr(HTTP, "\r\n\r\n");
-		if (content == NULL)
-		{
+		char* content = (char*)memmem(HTTP, http_len, "\r\n\r\n", 4);
+		if (content == NULL) {
 			LOGWARN("Session[%d] has not content, current content = %s", pSession->index, HTTP);
 			goto NOZIP;
 		}
+		if (pSession->content_type >= HTTP_CONTENT_FILE) {	// content be droped.
+			char* tmp = content+4;
+			*tmp = '\0';
+		} else if (HTTP_TRANSFER_CHUNKED == transfer_flag) {
+			char* pOldContent = strstr(HTTP, "\r\n\r\n");
+			if (pOldContent == NULL) {
+				LOGERROR("Session[%d] TRANSFER_CHUNKED, Current content= %s", pSession->index, HTTP_PRE);
+				goto NOZIP;
+			}
+			pOldContent += 4;
+			
+			char* pDest;
+			pDest = pOldContent;
+			char* pTmpContent = pOldContent;
+			while (pTmpContent < http_content+data_len) {	// TODO: Proc chunk
+				char* tmp = NULL;
+				int nChunkLen = strtol(pTmpContent, &tmp, 16);
+				if (nChunkLen > 0) {
+					nContentLength += nChunkLen;
+					pTmpContent = strstr(tmp, "\r\n");
+					if (pTmpContent != NULL) {
+						bcopy(pTmpContent+2, pDest, nChunkLen);
+						pDest += nChunkLen;
+						pTmpContent += 2+nChunkLen+2;
+					} else {	// TODO: end of content.
+						LOGERROR0("Not standard.[chunked]");
+						break;
+					}
+				} else {
+					LOGDEBUG("Session[%d] end of process-chunked. size = %d", pSession->index, nContentLength);
+					break;
+				}
+			}
+		} else if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == transfer_flag) {
+			nContentLength = pSession->http_content_length;
+		}
+		LOGDEBUG("Session[%d] get data nContentLength=%d", pSession->index, nContentLength);
+		
+		if (nContentLength == 0) { goto NOZIP; }
+		
 		content += 4;
 
-		LOGDEBUG("Session[%d] get data content_encoding_gzip=%d", pSession->index, pSession->content_encoding_gzip);
+		LOGDEBUG("Session[%d] get data content_encoding=%d", pSession->index, pSession->content_encoding);
 		
 		// gzip Content-Encoding: gzip
-		if (1 == pSession->content_encoding_gzip) 
-		{
+		if (pSession->content_encoding == HTTP_CONTENT_ENCODING_GZIP) {
 			const char* pZip_data = content;
 			char* pPlain = NULL;
-			int nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain);
-			if (nUnzipLen != -1)
-			{
+			uint32_t nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain);
+			if (nUnzipLen > 0) {
 				int new_data_len = data_len+(nUnzipLen-nContentLength);
 				char* new_http_content = calloc(1, new_data_len);
-				if (new_http_content != NULL) 
-				{
+				if (new_http_content != NULL) {
 					int npos = content - http_content;
 					memcpy(new_http_content, http_content, npos);
 					memcpy(new_http_content+npos, pPlain, nUnzipLen);
@@ -1383,13 +1126,15 @@ int GetHttpData(char **data)
 					free(http_content);
 					data_len = npos+1;
 					http_content = new_http_content;
-				}
-				else
-				{
+				} else {
 					LOGERROR("cannt calloc() new_data, %s", strerror(errno));
 					goto NOZIP;
 				}
 			}
+		} else if (pSession->content_encoding==HTTP_CONTENT_ENCODING_DEFLATE){
+			LOGERROR0("not support Content-Encoding = deflate");
+		} else if (pSession->content_encoding==HTTP_CONTENT_ENCODING_COMPRESS) {
+			LOGERROR0("not support Content-Encoding = compress");
 		}
 NOZIP:
 		CleanHttpSession(pSession);
@@ -1397,12 +1142,11 @@ NOZIP:
 		LOGDEBUG("Session[%d] get data successfully!", pSession->index);
 		
 		return data_len;
-	}
-	else
-	{
-		LOGDEBUG("Session[%d] content is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
+	} else {
+		LOGERROR("Session[%d] is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
 	}
 	
+ERROR_EXIT:
 	CleanHttpSession(pSession);
 	free(http_content);
 	return 0;
