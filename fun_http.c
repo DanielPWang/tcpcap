@@ -188,6 +188,59 @@ void *_process_timeout(void* p)
 	}
 	return NULL;
 }
+void _init_new_http_session( struct http_session* pIDL, const char* packet)
+{
+	struct timeval *tv = (struct timeval*)packet;
+	struct iphdr *iphead = IPHDR(packet);
+	struct tcphdr *tcphead=TCPHDR(iphead);
+	unsigned contentlen = tcphead->window;
+	char *content = (void*)tcphead + tcphead->doff*4;
+
+	pIDL->flag = HTTP_SESSION_REQUESTING;
+	if (*(unsigned*)content==_get_image || *(unsigned*)content==_get_image || FLOW_GET(packet)==C2S) {
+		pIDL->client.ip.s_addr = iphead->saddr;
+		pIDL->server.ip.s_addr = iphead->daddr;
+		pIDL->client.port = tcphead->source;
+		pIDL->server.port = tcphead->dest;
+	} else {
+		pIDL->client.ip.s_addr = iphead->daddr;
+		pIDL->server.ip.s_addr = iphead->saddr;
+		pIDL->client.port = tcphead->dest;
+		pIDL->server.port = tcphead->source;
+	}
+	pIDL->create = *tv;
+	pIDL->update = *tv;
+	pIDL->seq = tcphead->seq;
+	pIDL->ack = tcphead->ack_seq;
+	pIDL->data = (void*)packet;
+	pIDL->lastdata = (void*)packet;
+	pIDL->contentlen = contentlen;
+	pIDL->http_content_length = 0;
+	pIDL->res2 = 0;
+	pIDL->transfer_flag = HTTP_TRANSFER_INIT;
+	pIDL->response_head_recv_flag = 0;
+	pIDL->content_encoding_gzip = 0;
+	pIDL->content_type = HTTP_CONTENT_NONE;
+	pIDL->response_head = NULL;
+	pIDL->response_head_gen_time = 0;
+	pIDL->response_head_len = 0;
+	pIDL->request_head_len_valid_flag = 0;
+	*(const char**)packet = NULL;
+	if ((*(unsigned*)content==_get_image)
+			&& content[contentlen-4]=='\r' && content[contentlen-3]=='\n'
+			&& content[contentlen-2]=='\r' && content[contentlen-1]=='\n') {
+		pIDL->flag = HTTP_SESSION_REQUEST;
+	} else if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug. maybe not complete
+		pIDL->flag = HTTP_SESSION_REQUEST;
+	} else {
+		pIDL->flag = HTTP_SESSION_REQUEST;
+	}
+
+	// TODO:
+	pIDL->prev = NULL;
+	pIDL->next = NULL;
+	LOGTRACE("Session[%d] NewHttpSession", pIDL->index);
+}
 char* _IGNORE_EXT[] = { ".gif", ".js", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
 int NewHttpSession(const char* packet)
 {
@@ -229,41 +282,8 @@ LOOP_DEBUG:
 	pIDL = (struct http_session*)pop_queue_timedwait(_idl_session);
 	if (DEBUG && pIDL==NULL) {	goto LOOP_DEBUG; }	// For test
 	if (pIDL == NULL) return -2;
-
-	pIDL->flag = HTTP_SESSION_REQUESTING;
-	pIDL->client.ip.s_addr = iphead->saddr;
-	pIDL->server.ip.s_addr = iphead->daddr;
-	pIDL->client.port = tcphead->source;
-	pIDL->server.port = tcphead->dest;
-	pIDL->create = *tv;
-	pIDL->update = *tv;
-	pIDL->seq = tcphead->seq;
-	pIDL->ack = tcphead->ack_seq;
-	pIDL->data = (void*)packet;
-	pIDL->lastdata = (void*)packet;
-	pIDL->contentlen = contentlen;
-	pIDL->http_content_length = 0;
-	pIDL->res2 = 0;
-	pIDL->transfer_flag = HTTP_TRANSFER_INIT;
-	pIDL->response_head_recv_flag = 0;
-	pIDL->content_encoding_gzip = 0;
-	pIDL->content_type = HTTP_CONTENT_NONE;
-	pIDL->response_head = NULL;
-	pIDL->response_head_gen_time = 0;
-	pIDL->response_head_len = 0;
-	pIDL->request_head_len_valid_flag = 0;
-	*(const char**)packet = NULL;
-	if ((*(unsigned*)content==_get_image)
-			&& content[contentlen-4]=='\r' && content[contentlen-3]=='\n'
-			&& content[contentlen-2]=='\r' && content[contentlen-1]=='\n') {
-		pIDL->flag = HTTP_SESSION_REQUEST;
-	} else if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug. maybe not complete
-		pIDL->flag = HTTP_SESSION_REQUEST;
-	}
-
-	// TODO:
-	pIDL->prev = NULL;
-	pIDL->next = NULL;
+	_init_new_http_session(pIDL, packet);
+	// only for query
 	pIDL->query_url.content = cmdline;
 	pIDL->query_url.len = cmdlinen;
 	if (FLOW_GET(packet)!=C2S) {
@@ -273,7 +293,6 @@ LOOP_DEBUG:
 		LOGERROR("client[%s:%u.%d] maybe server. => [%s:%u]", sip, ntohs(tcphead->source),
 				FLOW_GET(packet), dip, ntohs(tcphead->dest));
 	}
-	LOGTRACE("Session[%d] NewHttpSession", pIDL->index);
 	return pIDL->index;
 }
 
@@ -392,15 +411,37 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		return HTTP_APPEND_SUCCESS;
 	}
 	// TODO: if HTTP_CONTENT_FILE, drop packet. 
-	if (pSession->content_type>=HTTP_CONTENT_FILE){
-		// TODO: Content-Length/Transfer-Encoding. HTTP_SESSION_FINISH
-		free((void*)pPacket);
-		return HTTP_APPEND_SUCCESS;
-	} else {
-		*(const char**)pPacket = NULL;
-		*(const char**)pSession->lastdata = pPacket;
-		pSession->lastdata = (void*)pPacket;
-		return HTTP_APPEND_SUCCESS;
+	switch (pSession->content_type) {
+		case HTTP_CONTENT_FILE:
+		case HTTP_CONTENT_JSCRIPT:
+		case HTTP_CONTENT_IMAGE:
+		case HTTP_CONTENT_RES:
+		case HTTP_CONTENT_FILE_PDF:
+		case HTTP_CONTENT_FILE_KDH:
+		case HTTP_CONTENT_FILE_CEB:
+		case HTTP_CONTENT_FILE_CAJ:
+		case HTTP_CONTENT_FILE_MARC:
+		case HTTP_CONTENT_FILE_RIS:
+		case HTTP_CONTENT_FILE_BIB:
+		case HTTP_CONTENT_FILE_TXT:
+		case HTTP_CONTENT_FILE_PDG:
+		case HTTP_CONTENT_FILE_EXCEL:
+		case HTTP_CONTENT_FILE_RTF:
+		case HTTP_CONTENT_FILE_OTHER:
+			free((void*)pPacket);
+			return HTTP_APPEND_SUCCESS;
+		case HTTP_CONTENT_NONE:
+		case HTTP_CONTENT_HTML:
+			*(const char**)pPacket = NULL;
+			*(const char**)pSession->lastdata = pPacket;
+			pSession->lastdata = (void*)pPacket;
+			return HTTP_APPEND_SUCCESS;
+		default:
+			assert(0);
+			*(const char**)pPacket = NULL;
+			*(const char**)pSession->lastdata = pPacket;
+			pSession->lastdata = (void*)pPacket;
+			return HTTP_APPEND_SUCCESS;
 	}
 /**
 	if (HTTP_TRANSFER_HAVE_CONTENT_LENGTH == pSession->transfer_flag)
@@ -508,21 +549,14 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	if (pSession->flag != HTTP_SESSION_REQUESTING) {
 		if (pSession->flag != HTTP_SESSION_REQUEST) {
 			char sip[32], dip[32];
-			LOGERROR("expect query[%u]. %s:%u.%u.%u -> %s:%u", pSession->flag,
+			LOGERROR("expect query[%u]. %s:%u.%u.%u.%u -> %s:%u", pSession->flag,
 					inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
-					tcphead->seq, tcphead->ack_seq,
+					tcphead->seq, tcphead->ack_seq, tcphead->window,
 					inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
 			pSession->flag = HTTP_SESSION_REUSED;
 			push_queue(_whole_content, pSession);
 			free((void*)pPacket);
 			return HTTP_APPEND_REUSE;
-		} else {
-			if (*(uint32_t*)pSession->query_url.content != _post_image) {
-				char* tmp = (char*)alloca(pSession->query_url.len+1);
-				memcpy(tmp, pSession->query_url.content, pSession->query_url.len+1);
-				tmp[pSession->query_url.len] = '\0';
-				LOGERROR("? [%s]. Current flag = %u", tmp, pSession->flag);
-			}
 		}
 	}
 	if (memmem(content, contentlen, "\r\n\r\n", 4)!=NULL) {
@@ -638,8 +672,7 @@ int AppendResponse(const char* packet)
 			}
 			nRs = AppendServerToClient(index, packet);
 			break;
-		}
-		else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source 
+		} else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source 
 				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) { 
 			// client -> server
 			if (FLOW_GET(packet)!=C2S) {
@@ -654,8 +687,8 @@ int AppendResponse(const char* packet)
 			break;
 		} 
 	}
-	if (index == g_nMaxHttpSessionCount) 
-	{
+	if (index == g_nMaxHttpSessionCount) {
+		// TODO: another new session
 		char sip[20], dip[20], stip[20], dtip[20];
 		LOGINFO("packet drop. %s:%d.%u.%u => %s:%d\n%s", 
 				inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
@@ -998,7 +1031,7 @@ int GetHttpData(char **data)
 	INC_WHOLE_HTML_SESSION;
 	
 	if (pSession->flag < HTTP_SESSION_FINISH) {
-		LOGFATAL("Session.flag=%d. want HTTP_SESSION_FINISH", pSession->flag);
+		LOGERROR("Session.flag=%d. want HTTP_SESSION_FINISH", pSession->flag);
 		// TODO: uncomplete session
 		CleanHttpSession(pSession);
 		return 0;

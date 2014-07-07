@@ -474,7 +474,7 @@ thread_start:
 		int clients = epoll_wait(_srv_epoll, &cli_event, 1, 5*1000);
 		if (clients == 0) continue;
 		if (clients < 0) {
-			LOGERROR0("epoll_wait return error.");
+			if (errno != EINTR) LOGERROR("epoll_wait return error. %s", strerror(errno));
 			continue;
 		}
 

@@ -24,11 +24,14 @@ void PrintStatis()
 }
 void PrintTitle()
 {
-	printf("CAP\tPKTSIN\tPKTSOUT\tSEND\tWHOLE\tDROPPKT\n");
+	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tSEND\tWHOLE\tDROPPKT\n");
 }
 void PrintStati()
 {
-	printf("%u\t%u\t%u\t%u\t%u\t%u\t\n", total_pcap, packets_pushed, packets_pop,
+	time_t now = time(NULL);
+	char stime[64];
+	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
+	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, packets_pop,
 			sent_count, whole_html_session, drop_packet_count);
 }
 void* _show_statis_thread(void* p)
