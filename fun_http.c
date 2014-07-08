@@ -260,7 +260,13 @@ int NewHttpSession(const char* packet)
 	char tmp = *enter;
 	int cmdlinen = enter-content;
 	*enter = '\0';
-	LOGTRACE("New http-session: %s", cmdline);
+	{
+		char sip[16], dip[16];
+		LOGINFO("New session[%s:%u->%s:%u]: %s", 
+				inet_ntop(AF_INET, &iphead->saddr, sip, 16), ntohs(tcphead->source),
+				inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest),
+				cmdline);
+	}
 	//  reuse
 	for (int n=0; n<g_nMaxHttpSessionCount; ++n){
 		struct http_session* p = &_http_session[n];
@@ -296,6 +302,61 @@ LOOP_DEBUG:
 	return pIDL->index;
 }
 
+int _insert_into_session(struct http_session* session, const char* packet)
+{
+	ASSERT(session!=NULL);
+	struct iphdr *iphead = IPHDR(packet);
+	struct tcphdr *tcphead = TCPHDR(iphead);
+	unsigned contentlen = tcphead->window;
+
+	const char* head = session->data;
+	const char* next = *(const char**)head;
+	const char* prev = NULL;
+	struct iphdr *next_ip ;
+	struct tcphdr *next_tcp ;
+	unsigned next_content_len ;
+	for (; next!=NULL; next=*(const char**)next) {
+		next_ip = IPHDR(next);
+		next_tcp = TCPHDR(iphead);
+		next_content_len = next_tcp->window;
+
+		if (tcphead->seq <= next_tcp->seq) { // resend
+			break;
+		}
+		prev = next;
+	}
+	if (next_tcp!=NULL){
+		if (tcphead->seq == next_tcp->seq) {	// resend
+			char sip[32], dip[32];
+			LOGWARN("Resend. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+					inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
+					contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(packet),
+					inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
+			LOGWARN("Resend. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+					inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
+					next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next),
+					inet_ntop(AF_INET, &next_ip->daddr, sip, 32), ntohs(next_tcp->dest));
+			LOGERROR("Drop packet. Session[%u]", session->index);
+			tcphead->window = 0;
+		} else if (tcphead->seq < next_tcp->seq) {
+			if (prev == NULL) {
+				LOGFATAL0("Never get here.");
+				return -1;
+			} else {
+				*(const char**)prev = packet;
+				*(const char**)packet = next;
+			}
+		} else {
+			LOGFATAL0("Never get here.");
+			return -1;
+		}
+	} else {
+		LOGFATAL0("Never get here.");
+		return -1;
+	}
+	return 0;
+}
+
 int AppendServerToClient(int nIndex, const char* pPacket)
 { 
 	ASSERT(nIndex >= 0);
@@ -306,12 +367,20 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 	unsigned contentlen = tcphead->window;
 	char *content = (void*)tcphead + tcphead->doff*4;
 	struct http_session *pSession = &_http_session[nIndex];
+	int append = 1;
 
 	// TODO: not deal with wrong order. seq == ack_seq
-	pSession->seq = tcphead->ack_seq;
-	pSession->ack = tcphead->seq;
-	pSession->contentlen = contentlen;
-	pSession->update = *tv;
+	if (tcphead->seq <  pSession->ack) {
+		if (0 == _insert_into_session(pSession, pPacket)) 
+			append = 0;
+		else
+			contentlen = 0;
+	} else {
+		pSession->seq = tcphead->ack_seq;
+		pSession->ack = tcphead->seq;
+		pSession->contentlen = contentlen;
+		pSession->update = *tv;
+	}
 
 	// tcp
 	if (tcphead->rst) {
@@ -420,9 +489,11 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		// TODO: gzip
 		// end gzip
 		pSession->flag = HTTP_SESSION_REPONSE_ENTITY;
-		*(const char**)pPacket = NULL;
-		*(const char**)pSession->lastdata = pPacket;
-		pSession->lastdata = (void*)pPacket;
+		if (append) {
+			*(const char**)pPacket = NULL;
+			*(const char**)pSession->lastdata = pPacket;
+			pSession->lastdata = (void*)pPacket;
+		}
 		return HTTP_APPEND_SUCCESS;
 	}
 	// TODO: if HTTP_CONTENT_FILE, drop packet. 
@@ -447,15 +518,19 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 			return HTTP_APPEND_SUCCESS;
 		case HTTP_CONTENT_NONE:
 		case HTTP_CONTENT_HTML:
-			*(const char**)pPacket = NULL;
-			*(const char**)pSession->lastdata = pPacket;
-			pSession->lastdata = (void*)pPacket;
+			if (append) {
+				*(const char**)pPacket = NULL;
+				*(const char**)pSession->lastdata = pPacket;
+				pSession->lastdata = (void*)pPacket;
+			}
 			return HTTP_APPEND_SUCCESS;
 		default:
 			assert(0);
-			*(const char**)pPacket = NULL;
-			*(const char**)pSession->lastdata = pPacket;
-			pSession->lastdata = (void*)pPacket;
+			if (append) {
+				*(const char**)pPacket = NULL;
+				*(const char**)pSession->lastdata = pPacket;
+				pSession->lastdata = (void*)pPacket;
+			}
 			return HTTP_APPEND_SUCCESS;
 	}
 
@@ -525,70 +600,6 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	return HTTP_APPEND_SUCCESS;
 }
 
-int AppendLaterPacket(int nIndex)
-{
-	ASSERT(nIndex >= 0);
-	
-	struct http_session *pSession = &_http_session[nIndex];
-	void *pLaterPack = pSession->pack_later;
-	
-	if (pLaterPack != NULL)
-	{
-		LOGDEBUG("###########Start Process later packet list! index=%d", nIndex);
-		
-		void *pCurTmp = NULL, *pPreTmp = NULL;
-		while (pLaterPack != NULL) 
-		{
-			pCurTmp = pLaterPack;
-			pLaterPack = *(void**)pLaterPack;
-			int nRs = AppendServerToClient(nIndex, pCurTmp);
-			LOGDEBUG("Process later packet, ******** nRs=%d ******** index=%d", nRs, nIndex);
-			
-			if (nRs == HTTP_APPEND_DROP_PACKET 
-				|| nRs == HTTP_APPEND_ADD_PACKET 
-				|| nRs == HTTP_APPEND_FINISH_LATER)
-			{
-				if (pCurTmp == pSession->pack_later)
-				{
-					pSession->pack_later = pLaterPack;
-				}
-				else
-				{
-					*(void**)pPreTmp = pLaterPack;
-					if (pLaterPack == NULL)
-						pSession->last_pack_later = pPreTmp;
-				}
-				
-				switch (nRs)
-				{
-				case HTTP_APPEND_DROP_PACKET:
-					free(pCurTmp);
-					break;
-				case HTTP_APPEND_FINISH_LATER:
-					pSession->flag = HTTP_SESSION_FINISH;
-					if (push_queue(_whole_content, pSession) < 0)
-						LOGWARN("whole content queue is full. count = %d", ++g_nCountWholeContentFull);
-					
-					break;
-				default:
-					break;
-				}
-
-				pSession->later_pack_size--;
-					
-				if (nRs == HTTP_APPEND_FINISH_LATER)
-					break;
-				else
-					continue;
-			}
-			pPreTmp = pCurTmp;
-		}
-		LOGDEBUG("###########End Process later packet list! index=%d", nIndex);
-	}
-
-	return 0;
-}
-
 int AppendResponse(const char* packet)
 {
 	struct timeval *tv = (struct timeval*)packet;
@@ -641,13 +652,13 @@ int AppendResponse(const char* packet)
 	if (index == g_nMaxHttpSessionCount) {
 		// TODO: another new session
 		char sip[20], dip[20], stip[20], dtip[20];
-		LOGINFO("packet drop. %s:%d.%u.%u => %s:%d\n%s", 
+		LOGINFO("Cannt find session. drop. %s:%d.%u.%u => %s:%d\n%s", 
 				inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
 				tcphead->seq, tcphead->ack_seq,
 				inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest),
 				content);
 		
-		index = HTTP_APPEND_DROP_PACKET;
+		index = HTTP_APPEND_FAIL;
 	}
 
 	return index;
@@ -699,8 +710,8 @@ void *HTTP_Thread(void* param)
 		}
 
 		int nIndex = AppendResponse(packet);
-		if (nIndex == HTTP_APPEND_DROP_PACKET) {
-			LOGDEBUG0("cannt find session");
+		if (nIndex == HTTP_APPEND_FAIL) {
+			free((void*)packet); // LOGDEBUG0("cannt find session");
 		}
 	}
 	printf("Exit http thread.\n");
@@ -829,12 +840,10 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 	}
 
 	if (nRs == -1) {
-		struct in_addr sip, dip; 
-
-		sip.s_addr = iphead->saddr;
-		dip.s_addr = iphead->daddr;
 		char ssip[16], sdip[16];
-		LOGINFO("%s => %s is skiped.", strcpy(ssip, inet_ntoa(sip)), strcpy(sdip,inet_ntoa(dip)));
+		LOGINFO("%s:%u => %s:%u is skiped.", 
+				inet_ntop(AF_INET, &iphead->saddr, ssip, 16), ntohs(tcphead->source),
+				inet_ntop(AF_INET, &iphead->daddr, sdip, 16), ntohs(tcphead->dest));
 	}
 	pthread_mutex_unlock(&_host_ip_lock);
 	return nRs;
