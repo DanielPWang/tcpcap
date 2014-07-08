@@ -50,13 +50,15 @@ static int _comp_host(const void* l, const void* r)
 	const struct hosts_t *rh = (const struct hosts_t *)r;
 	if (rh->ip.s_addr == INADDR_BROADCAST || lh->ip.s_addr == INADDR_BROADCAST) {
 		if (rh->port == 0u || lh->port==0u) return 0;
-		return rh->port - lh->port;
+		return (int)rh->port - (int)lh->port;
 	}
 	if (lh->ip.s_addr == rh->ip.s_addr) {
 		if (rh->port == 0u || lh->port==0u) return 0;
-		return lh->port - rh->port;
+		return (int)lh->port - (int)rh->port;
 	}
-	return lh->ip.s_addr - rh->ip.s_addr;
+	if (lh->ip.s_addr>rh->ip.s_addr) return 1;
+	if (lh->ip.s_addr<rh->ip.s_addr) return -1;
+	return 0;
 }
 // int inHosts(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
 void *inHosts(const void *hosts, const struct hosts_t *host)
@@ -80,15 +82,14 @@ void* LoadHost(char* hostsbuff)
 	p->count = count_char(hostsbuff, '\n') + 1;
 	p->hosts = (struct hosts_t *)calloc(sizeof(struct hosts_t), p->count);
 
+	//char sip[16];
 	for(left=hostsbuff; ;left=NULL) {
 		ipport = strtok_r(left, "\n", &right);
 		if (ipport==NULL) break;
 		LOGINFO("monitor host %s", ipport);
-		if (str_ipp(ipport, &(p->hosts[n]))) {
-		   	++n; 
-		}
+		if (str_ipp(ipport, &(p->hosts[n]))) { ++n; }
 	}
-
+	p->count = n;
 	qsort(p->hosts, p->count, sizeof(struct hosts_t), _comp_host);
 	return p;
 }

@@ -197,7 +197,7 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	char *content = (void*)tcphead + tcphead->doff*4;
 
 	pIDL->flag = HTTP_SESSION_REQUESTING;
-	if (*(unsigned*)content==_get_image || *(unsigned*)content==_get_image || FLOW_GET(packet)==C2S) {
+	if (*(unsigned*)content==_get_image || *(unsigned*)content==_get_image || FLOW_GET(tcphead)==C2S) {
 		pIDL->client.ip.s_addr = iphead->saddr;
 		pIDL->server.ip.s_addr = iphead->daddr;
 		pIDL->client.port = tcphead->source;
@@ -241,7 +241,7 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	pIDL->next = NULL;
 	LOGTRACE("Session[%d] NewHttpSession", pIDL->index);
 }
-char* _IGNORE_EXT[] = { ".gif", ".js", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
+char* _IGNORE_EXT[] = { ".gif", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
 int NewHttpSession(const char* packet)
 {
 	struct timeval *tv = (struct timeval*)packet;
@@ -278,9 +278,9 @@ int NewHttpSession(const char* packet)
 		}
 	}
 	
-	for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
+	/*for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
 		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;	// TODO: ignore
-	}
+	}*/
 	*enter = tmp;
 
 	struct http_session* pIDL = NULL;
@@ -292,12 +292,12 @@ LOOP_DEBUG:
 	// only for query
 	pIDL->query_url.content = cmdline;
 	pIDL->query_url.len = cmdlinen;
-	if (FLOW_GET(packet)!=C2S) {
+	if (FLOW_GET(tcphead)!=C2S) {
 		char sip[32],dip[32];
 		inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
 		inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
 		LOGERROR("client[%s:%u.%d] maybe server. => [%s:%u]", sip, ntohs(tcphead->source),
-				FLOW_GET(packet), dip, ntohs(tcphead->dest));
+				FLOW_GET(tcphead), dip, ntohs(tcphead->dest));
 	}
 	return pIDL->index;
 }
@@ -320,22 +320,22 @@ int _insert_into_session(struct http_session* session, const char* packet)
 		next_tcp = TCPHDR(iphead);
 		next_content_len = next_tcp->window;
 
-		if (tcphead->seq <= next_tcp->seq) { // resend
+		if (FLOW_GET(tcphead)==FLOW_GET(next_tcp) && (tcphead->seq <= next_tcp->seq)) { // resend
 			break;
 		}
 		prev = next;
 	}
 	if (next_tcp!=NULL){
+		char sip[32], dip[32];
 		if (tcphead->seq == next_tcp->seq) {	// resend
-			char sip[32], dip[32];
 			LOGWARN("Resend. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
 					inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
-					contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(packet),
+					contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
 					inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
 			LOGWARN("Resend. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
 					inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
-					next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next),
-					inet_ntop(AF_INET, &next_ip->daddr, sip, 32), ntohs(next_tcp->dest));
+					next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
+					inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
 			LOGERROR("Drop packet. Session[%u]", session->index);
 			tcphead->window = 0;
 		} else if (tcphead->seq < next_tcp->seq) {
@@ -343,6 +343,14 @@ int _insert_into_session(struct http_session* session, const char* packet)
 				LOGFATAL0("Never get here.");
 				return -1;
 			} else {
+				LOGWARN("Fix order. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+						inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
+						contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
+						inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
+				LOGWARN("Fix order. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+						inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
+						next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
+						inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
 				*(const char**)prev = packet;
 				*(const char**)packet = next;
 			}
@@ -369,7 +377,6 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 	struct http_session *pSession = &_http_session[nIndex];
 	int append = 1;
 
-	// TODO: not deal with wrong order. seq == ack_seq
 	if (tcphead->seq <  pSession->ack) {
 		if (0 == _insert_into_session(pSession, pPacket)) 
 			append = 0;
@@ -381,6 +388,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		pSession->contentlen = contentlen;
 		pSession->update = *tv;
 	}
+	contentlen = tcphead->window;
 
 	// tcp
 	if (tcphead->rst) {
@@ -547,6 +555,20 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	int contentlen = tcphead->window;
 	const char *content = (void*)tcphead + tcphead->doff*4;
 	struct http_session *pSession = &_http_session[nIndex];
+	int append = 1;
+
+	if (tcphead->seq <  pSession->ack) {
+		if (0 == _insert_into_session(pSession, pPacket)) 
+			append = 0;
+		else
+			contentlen = 0;
+	} else {
+		pSession->seq = tcphead->ack_seq;
+		pSession->ack = tcphead->seq;
+		pSession->contentlen = contentlen;
+		pSession->update = *tv;
+	}
+	contentlen = tcphead->window;
 
 	// tcp
 	if (tcphead->rst) {
@@ -589,13 +611,15 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 		pSession->flag = HTTP_SESSION_REQUEST;
 	}
 
-	pSession->seq = tcphead->seq;
-	pSession->ack = tcphead->ack_seq;
-	pSession->contentlen = contentlen;
-	pSession->update = *tv;
-	*(const char**)pPacket = NULL;
-	*(const char**)pSession->lastdata = pPacket;
-	pSession->lastdata = (void*)pPacket;
+	if (append) {
+		pSession->seq = tcphead->seq;
+		pSession->ack = tcphead->ack_seq;
+		pSession->contentlen = contentlen;
+		pSession->update = *tv;
+		*(const char**)pPacket = NULL;
+		*(const char**)pSession->lastdata = pPacket;
+		pSession->lastdata = (void*)pPacket;
+	}
 
 	return HTTP_APPEND_SUCCESS;
 }
@@ -612,7 +636,7 @@ int AppendResponse(const char* packet)
 		free((void*)packet);
 		return HTTP_APPEND_SUCCESS;
 	}
-	int flow = FLOW_GET(packet);
+	int flow = FLOW_GET(tcphead);
 
 	int index = 0;
 	for (; index < g_nMaxHttpSessionCount; ++index) // TODO: MAX_HTTP_SESSION
@@ -624,26 +648,26 @@ int AppendResponse(const char* packet)
 		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
 			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) {
 			// server -> client
-			if (FLOW_GET(packet)!=S2C) {
+			if (FLOW_GET(tcphead)!=S2C) {
 				char sip[32],dip[32];
 				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
 				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
 				LOGERROR("server[%s:%u.%u.%u.%u] maybe client. => [%s:%u]", sip, 
 						ntohs(tcphead->source), tcphead->seq, tcphead->ack_seq,
-					FLOW_GET(packet), dip, ntohs(tcphead->dest));
+					FLOW_GET(tcphead), dip, ntohs(tcphead->dest));
 			}
 			nRs = AppendServerToClient(index, packet);
 			break;
 		} else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source 
 				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) { 
 			// client -> server
-			if (FLOW_GET(packet)!=C2S) {
+			if (FLOW_GET(tcphead)!=C2S) {
 				char sip[32],dip[32];
 				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
 				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
 				LOGERROR("client[%s:%u.%d.%u.%u] maybe server. => [%s:%u]", sip, 
 						ntohs(tcphead->source), tcphead->seq, tcphead->ack_seq,
-					FLOW_GET(packet), dip, ntohs(tcphead->dest));
+					FLOW_GET(tcphead), dip, ntohs(tcphead->dest));
 			}
 			nRs = AppendClientToServer(index, packet);
 			break;
@@ -827,16 +851,17 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 {
 	int nRs = -1;
 
+	struct tcphdr* tcphd = (struct tcphdr*)tcphead;
 	struct hosts_t host = { {iphead->saddr}, tcphead->source };
 	struct hosts_t host1 = { {iphead->daddr}, tcphead->dest};
 	pthread_mutex_lock(&_host_ip_lock);
 	
 	if (inHosts(_valid_hosts, &host)!=NULL ) {
 		nRs = PushHttpPack(buffer, iphead, tcphead);
-		FLOW_SET(buffer, S2C);
+		FLOW_SET(tcphd, S2C);
 	} else if (inHosts(_valid_hosts, &host1)!=NULL) {
 		nRs = PushHttpPack(buffer, iphead, tcphead);
-		FLOW_SET(buffer, C2S);
+		FLOW_SET(tcphd, C2S);
 	}
 
 	if (nRs == -1) {
