@@ -272,6 +272,9 @@ int NewHttpSession(const char* packet)
 		struct http_session* p = &_http_session[n];
 		if (p->flag >= HTTP_SESSION_FINISH) continue;
 		if (p->client.ip.s_addr == iphead->saddr && p->client.port==tcphead->source){
+			if (p->seq >= tcphead->seq) { // resend
+				return -3;
+			}
 			p->flag = HTTP_SESSION_REUSED;
 			push_queue(_whole_content, p);
 			break;
@@ -638,6 +641,7 @@ int AppendResponse(const char* packet)
 	}
 	int flow = FLOW_GET(tcphead);
 
+	char sip[32],dip[32];
 	int index = 0;
 	for (; index < g_nMaxHttpSessionCount; ++index) // TODO: MAX_HTTP_SESSION
 	{
@@ -649,7 +653,6 @@ int AppendResponse(const char* packet)
 			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) {
 			// server -> client
 			if (FLOW_GET(tcphead)!=S2C) {
-				char sip[32],dip[32];
 				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
 				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
 				LOGERROR("server[%s:%u.%u.%u.%u] maybe client. => [%s:%u]", sip, 
@@ -662,7 +665,6 @@ int AppendResponse(const char* packet)
 				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) { 
 			// client -> server
 			if (FLOW_GET(tcphead)!=C2S) {
-				char sip[32],dip[32];
 				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
 				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
 				LOGERROR("client[%s:%u.%d.%u.%u] maybe server. => [%s:%u]", sip, 
@@ -728,6 +730,14 @@ void *HTTP_Thread(void* param)
 					content[32] = '\0';
 					LOGWARN("_http_session is full. drop content = %s", content);
 				}
+				free((void*)packet);
+			} else if (nRes == -3) {
+				char sip[16],dip[16];
+				content[tcphead->window] = '\0';
+				LOGWARN("Resend Query? may be duplicate.%s:%u.%u.%u.%u->%s:%u. \n%s",
+						inet_ntop(AF_INET, &iphead->saddr, sip, 16), ntohs(tcphead->source),
+						tcphead->seq, tcphead->ack_seq, tcphead->window,
+						inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest), content);
 				free((void*)packet);
 			}
 			continue;
@@ -1075,7 +1085,7 @@ int GetHttpData(char **data)
 	}
 	
 	LOGDEBUG("Session[%d] ready to get data", pSession->index);
-	if ((pSession->content_type != HTTP_CONTENT_NONE) || (HTTP_TRANSFER_WITH_HTML_END == transfer_flag)) {
+	if ((pSession->content_type != HTTP_CONTENT_NONE) || (HTTP_TRANSFER_OTHER== transfer_flag)) {
 		// get http code
 		char* http_code = strstr(HTTP, "HTTP/1.1 ");
 		if (NULL == http_code) http_code = strstr(HTTP, "HTTP/1.0 ");
@@ -1169,6 +1179,9 @@ int GetHttpData(char **data)
 			LOGERROR0("not support Content-Encoding = deflate");
 		} else if (pSession->content_encoding==HTTP_CONTENT_ENCODING_COMPRESS) {
 			LOGERROR0("not support Content-Encoding = compress");
+		} else {
+			const char* htmlend = (const char*)memmem(content, nContentLength, "</html>", 7);
+			if (htmlend != NULL) { nContentLength = htmlend-content+7; }
 		}
 NOZIP:
 		CleanHttpSession(pSession);

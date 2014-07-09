@@ -1,6 +1,6 @@
 TARGET = eru_agent
 OUTDIR = build/
-CC = gcc
+CC = /home/daniel/gcc447/bin/gcc
 
 ifdef RELEASE
 	CFLAGS = -Wall -O1 -pg
