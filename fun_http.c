@@ -381,7 +381,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 	struct http_session *pSession = &_http_session[nIndex];
 	int append = 1;
 
-	if (tcphead->seq <  pSession->ack) {
+	if (contentlen>0 && tcphead->seq<pSession->ack) {
 		if (0 == _insert_into_session(pSession, pPacket)) 
 			append = 0;
 		else
@@ -561,7 +561,7 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	struct http_session *pSession = &_http_session[nIndex];
 	int append = 1;
 
-	if (tcphead->seq <  pSession->ack) {
+	if (contentlen>0 && tcphead->seq<pSession->seq) {
 		if (0 == _insert_into_session(pSession, pPacket)) 
 			append = 0;
 		else
