@@ -210,6 +210,7 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	}
 	pIDL->create = *tv;
 	pIDL->update = *tv;
+	ASSERT(FLOW_GET(tcphead) == C2S);
 	pIDL->seq = tcphead->seq;
 	pIDL->ack = tcphead->ack_seq;
 	pIDL->data = (void*)packet;
@@ -566,8 +567,8 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 		else
 			contentlen = 0;
 	} else {
-		pSession->seq = tcphead->ack_seq;
-		pSession->ack = tcphead->seq;
+		pSession->seq = tcphead->seq;
+		pSession->ack = tcphead->ack_seq;
 		pSession->contentlen = contentlen;
 		pSession->update = *tv;
 	}
@@ -831,6 +832,10 @@ int HttpInit()
 	}
 	pthread_attr_destroy(&pattr);
 
+	pthread_t thread_timeout_id;
+	err = pthread_create(&thread_timeout_id, NULL, &_process_timeout, NULL);
+	ASSERT(err==0);
+
 	return _packets==NULL? -1:0;
 }
 
@@ -1085,7 +1090,7 @@ int GetHttpData(char **data)
 	}
 	
 	LOGDEBUG("Session[%d] ready to get data", pSession->index);
-	if ((pSession->content_type != HTTP_CONTENT_NONE) || (HTTP_TRANSFER_OTHER== transfer_flag)) {
+	if ((pSession->content_type != HTTP_CONTENT_NONE)) {
 		// get http code
 		char* http_code = strstr(HTTP, "HTTP/1.1 ");
 		if (NULL == http_code) http_code = strstr(HTTP, "HTTP/1.0 ");
@@ -1190,7 +1195,8 @@ NOZIP:
 		
 		return data_len;
 	} else {
-		LOGERROR("Session[%d] is HTTP_CONTENT_NONE and is not HTTP_TRANSFER_WITH_HTML_END", pSession->index);
+		LOGERROR("Session[%d] is HTTP_CONTENT_NONE [%u:%u]", 
+				pSession->index, pSession->content_type, pSession->transfer_flag);
 	}
 	
 ERROR_EXIT:
