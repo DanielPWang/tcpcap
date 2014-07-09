@@ -273,9 +273,7 @@ int NewHttpSession(const char* packet)
 		struct http_session* p = &_http_session[n];
 		if (p->flag >= HTTP_SESSION_FINISH) continue;
 		if (p->client.ip.s_addr == iphead->saddr && p->client.port==tcphead->source){
-			if (p->seq >= tcphead->seq) { // resend
-				return -3;
-			}
+			if (p->seq > tcphead->seq) { return -3; }	// resend?
 			p->flag = HTTP_SESSION_REUSED;
 			push_queue(_whole_content, p);
 			break;
