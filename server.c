@@ -604,6 +604,7 @@ void* client_thread(void *p)
 		if (_client_socket == -1) {
 			if (!fromdb) {
 				_save_data_to_db(data, datalen);
+				free(data);
 				data = NULL;
 			}
 			continue;
@@ -615,7 +616,7 @@ void* client_thread(void *p)
 			shutdown(_client_socket, SHUT_RDWR);
 			close(_client_socket);
 			_client_socket = -1;
-			continue;
+			_save_data_to_db(data, datalen);
 		}
 		free(data);
 		data = NULL;

@@ -536,8 +536,7 @@ CalcIPSum(unsigned short * w, int blen)
 	return (unsigned short) (~cksum);
 }
 
-unsigned short
-CalcTCPSum(unsigned short *h, unsigned short * d, int dlen)
+unsigned short CalcTCPSum(unsigned short *h, unsigned short * d, int dlen)
 {
 	unsigned int cksum;
 	unsigned short answer=0;

@@ -218,7 +218,7 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	pIDL->contentlen = contentlen;
 	pIDL->http_content_length = 0;
 	pIDL->res2 = 0;
-	pIDL->transfer_flag = HTTP_TRANSFER_INIT;
+	pIDL->transfer_flag = HTTP_TRANSFER_NONE;
 	pIDL->response_head_recv_flag = 0;
 	pIDL->content_encoding = HTTP_CONTENT_ENCODING_NONE;
 	pIDL->content_type = HTTP_CONTENT_NONE;
@@ -310,6 +310,7 @@ int _insert_into_session(struct http_session* session, const char* packet)
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	unsigned contentlen = tcphead->window;
+	ASSERT(contentlen > 0);
 
 	const char* head = session->data;
 	const char* next = *(const char**)head;
@@ -996,7 +997,7 @@ int GetHttpData(char **data)
 
 	// malloc
 	unsigned data_len = http_len+35+10+26+26+5+1;
-	char* http_content = (char*)calloc(1, data_len);
+	char* http_content = (char*)calloc(1, data_len+32);
 	if (http_content == NULL) {
 		push_queue(_whole_content, pSession);
 		*data = NULL;
@@ -1088,7 +1089,8 @@ int GetHttpData(char **data)
 	}
 	
 	LOGDEBUG("Session[%d] ready to get data", pSession->index);
-	if ((pSession->content_type != HTTP_CONTENT_NONE)) {
+	if (pSession->content_type != HTTP_CONTENT_NONE || pSession->transfer_flag!=HTTP_TRANSFER_NONE ||
+			pSession->flag != HTTP_SESSION_IDL) {
 		// get http code
 		char* http_code = strstr(HTTP, "HTTP/1.1 ");
 		if (NULL == http_code) http_code = strstr(HTTP, "HTTP/1.0 ");
@@ -1121,17 +1123,22 @@ int GetHttpData(char **data)
 			}
 			pOldContent += 4;
 			
-			char* pDest;
-			pDest = pOldContent;
+			char* pDest = pOldContent;
 			char* pTmpContent = pOldContent;
 			while (pTmpContent < http_content+data_len) {	// TODO: Proc chunk
 				char* tmp = NULL;
 				int nChunkLen = strtol(pTmpContent, &tmp, 16);
 				if (nChunkLen > 0) {
-					nContentLength += nChunkLen;
 					pTmpContent = strstr(tmp, "\r\n");
+					nContentLength += nChunkLen;
 					if (pTmpContent != NULL) {
-						bcopy(pTmpContent+2, pDest, nChunkLen);
+						int diff = http_content+data_len - pTmpContent-nChunkLen-2;
+						if (diff < 0) {
+							LOGERROR("Session[%d] error in chunked. diff=%d", pSession->index, diff);
+							nChunkLen += diff;
+						}
+						for(int _n=0; _n<nChunkLen; ++_n) { pDest[_n] = pTmpContent[2+_n]; }
+						// memmove(pDest, pTmpContent+2, nChunkLen);
 						pDest += nChunkLen;
 						pTmpContent += 2+nChunkLen+2;
 					} else {	// TODO: end of content.
@@ -1161,7 +1168,7 @@ int GetHttpData(char **data)
 			uint32_t nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain);
 			if (nUnzipLen > 0) {
 				int new_data_len = data_len+(nUnzipLen-nContentLength);
-				char* new_http_content = calloc(1, new_data_len);
+				char* new_http_content = calloc(1, new_data_len+32);
 				if (new_http_content != NULL) {
 					int npos = content - http_content;
 					memcpy(new_http_content, http_content, npos);
@@ -1184,7 +1191,12 @@ int GetHttpData(char **data)
 			LOGERROR0("not support Content-Encoding = compress");
 		} else {
 			const char* htmlend = (const char*)memmem(content, nContentLength, "</html>", 7);
-			if (htmlend != NULL) { nContentLength = htmlend-content+7; }
+			if (htmlend==NULL) htmlend= (const char*)memmem(content, nContentLength, "</HTML>", 7);
+			if (htmlend==NULL) htmlend= (const char*)memmem(content, nContentLength, "</Html>", 7);
+			if (htmlend != NULL) { 
+				nContentLength = htmlend-content+7;
+				content[nContentLength] = '\0';
+			}
 		}
 NOZIP:
 		CleanHttpSession(pSession);
@@ -1193,8 +1205,15 @@ NOZIP:
 		
 		return data_len;
 	} else {
-		LOGERROR("Session[%d] is HTTP_CONTENT_NONE [%u:%u]", 
-				pSession->index, pSession->content_type, pSession->transfer_flag);
+		static char no_query[] = "NO Query";
+		char* p = no_query;
+		if (pSession->query_url.content) {
+			p = (char*)pSession->query_url.content;
+			p[pSession->query_url.len] = '\0';
+		}
+		LOGERROR("Session[%d] %u, %u, %u,%s\n%s", 
+				pSession->index, pSession->flag, pSession->content_type, pSession->transfer_flag,
+				p, pSession->response_head);
 	}
 	
 ERROR_EXIT:
