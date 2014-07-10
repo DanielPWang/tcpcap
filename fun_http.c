@@ -344,13 +344,21 @@ int _insert_into_session(struct http_session* session, const char* packet)
 		} else if (tcphead->seq < next_tcp->seq) {
 			if (prev == NULL) {
 				LOGFATAL0("Never get here.");
-				return -1;
-			} else {
-				LOGWARN("Fix order. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+				LOGFATAL("Fix order. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
 						inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
 						contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
 						inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
-				LOGWARN("Fix order. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+				LOGFATAL("Fix order. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+						inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
+						next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
+						inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
+				return -1;
+			} else {
+				LOGTRACE("Fix order. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+						inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
+						contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
+						inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
+				LOGTRACE("Fix order. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
 						inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
 						next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
 						inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
@@ -359,6 +367,14 @@ int _insert_into_session(struct http_session* session, const char* packet)
 			}
 		} else {
 			LOGFATAL0("Never get here.");
+			LOGFATAL("Fix order. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+					inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
+					contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
+					inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
+			LOGFATAL("Fix order. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+					inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
+					next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
+					inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
 			return -1;
 		}
 	} else {
@@ -715,6 +731,7 @@ void *HTTP_Thread(void* param)
 
 		unsigned *cmd = (unsigned*)content;
 		if ((*cmd == _get_image || *cmd == _post_image) && contentlen>0) {	// TODO: bug
+			INC_HTTP_GET_POST;
 			// TODO: need to process RST and FIN
 			int nRes = NewHttpSession(packet);
 			if (nRes == -1) {
