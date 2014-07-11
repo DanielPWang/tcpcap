@@ -12,6 +12,7 @@ uint32_t sent_count = 0u;
 uint32_t whole_html_session = 0u;
 uint32_t drop_packet_count = 0u;
 uint32_t get_post_count = 0u;
+uint32_t drop_http_image = 0u;
 
 #define P(x) printf("\t" #x " = %u\n", x)
 void PrintStatis()
@@ -23,6 +24,7 @@ void PrintStatis()
 	P(sent_count);
 	P(whole_html_session);
 	P(drop_packet_count);
+	P(drop_http_image);
 }
 void PrintTitle()
 {
