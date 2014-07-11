@@ -941,7 +941,7 @@ int LoadHttpConf(const char* filename)
 static void* out = NULL;
 static uint32_t outlen = 0u;
 #define MAX_OUT_LEN (10*1024*1024-64)
-uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
+uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData, int gz)
 {	// TODO: gzip 
 	if (pGzipData == NULL) return 0;
 	if (out==NULL) {
@@ -953,16 +953,21 @@ uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData)
 	*pTransData = NULL;
 	uint32_t plain_len = *(uint32_t*)(pGzipData+nDataLen-4);
 	LOGDEBUG("TransGzipData, content length = %d, plain length = %d", nDataLen, plain_len);
-	if (plain_len > MAX_OUT_LEN) {
+	if (gz && plain_len>MAX_OUT_LEN) {
 		LOGERROR("%u properly error. try...", plain_len);
 	}
-	if (nDataLen > plain_len) {
+	if (gz && nDataLen>plain_len) {
 		LOGERROR("%u/%u properly error. try...", nDataLen, plain_len);
 	}
 	
 	uint32_t have;
 	z_stream strm = {0};
-	int err = inflateInit2(&strm, 47);
+	int err;
+	if (gz) {
+		err	= inflateInit2(&strm, 47);
+	} else {
+		err = inflateInit(&strm);
+	}
 	if (err != Z_OK) return 0;
 
 	strm.avail_in = nDataLen;
@@ -1143,10 +1148,16 @@ int GetHttpData(char **data)
 	LOGDEBUG("Session[%d] get data content_encoding=%d", pSession->index, pSession->content_encoding);
 	
 	// gzip Content-Encoding: gzip
-	if (pSession->content_encoding == HTTP_CONTENT_ENCODING_GZIP) {
+	if (pSession->content_encoding == HTTP_CONTENT_ENCODING_GZIP 
+	  ||pSession->content_encoding == HTTP_CONTENT_ENCODING_DEFLATE ) {
 		const char* pZip_data = content;
 		char* pPlain = NULL;
-		uint32_t nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain);
+		uint32_t nUnzipLen;
+		if (pSession->content_encoding==HTTP_CONTENT_ENCODING_GZIP) {
+			nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain, 1);
+		} else {
+			nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain, 0);
+		}
 		if (nUnzipLen > 0) {
 			int new_data_len = content-http_content+nUnzipLen;
 			char* new_http_content = (char*)malloc(new_data_len+32);
@@ -1167,9 +1178,7 @@ int GetHttpData(char **data)
 				goto NOZIP;
 			}
 		}
-	} else if (pSession->content_encoding==HTTP_CONTENT_ENCODING_DEFLATE){
-		LOGERROR0("not support Content-Encoding = deflate");
-	} else if (pSession->content_encoding==HTTP_CONTENT_ENCODING_COMPRESS) {
+	} else if (pSession->content_encoding==HTTP_CONTENT_ENCODING_COMPRESS) { // same with gzip
 		LOGERROR0("not support Content-Encoding = compress");
 	} else {
 		//const char* htmlend = (const char*)memmem(content, nContentLength, "</html>", 7);

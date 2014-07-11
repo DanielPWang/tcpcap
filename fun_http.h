@@ -88,7 +88,7 @@ int HttpStop();
 int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
-uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);
+uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData, int gz);
 int AppendServerToClient(int nIndex, const char* pPacket);
 int AppendClientToServer(int nIndex, const char* pPacket);
 int AppendResponse(const char* packet);
