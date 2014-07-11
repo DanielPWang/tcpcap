@@ -1082,7 +1082,7 @@ int GetHttpData(char **data)
 
 	// *(unsigned*)HTTP == _get_image, _post_image 
 	if (HTTP == NULL) {
-		LOGERROR0("Not http!!!!! cannt get here!!!.");
+		LOGERROR("Not http!!!!! cannt get here!!!. \n%s", HTTP_PRE);
 		goto ERROR_EXIT;
 	}
 
@@ -1118,8 +1118,8 @@ int GetHttpData(char **data)
 						LOGERROR("Session[%d] error in chunked. diff=%d", pSession->index, diff);
 						nChunkLen += diff;
 					}
-					for(int _n=0; _n<nChunkLen; ++_n) { pDest[_n] = pTmpContent[2+_n]; }
-					// memmove(pDest, pTmpContent+2, nChunkLen);
+					//for(int _n=0; _n<nChunkLen; ++_n) { pDest[_n] = pTmpContent[2+_n]; }
+					memmove(pDest, pTmpContent+2, nChunkLen);
 					pDest += nChunkLen;
 					pTmpContent += 2+nChunkLen+2;
 				} else {	// TODO: end of content.
@@ -1148,8 +1148,8 @@ int GetHttpData(char **data)
 		char* pPlain = NULL;
 		uint32_t nUnzipLen = TransGzipData(pZip_data, nContentLength, &pPlain);
 		if (nUnzipLen > 0) {
-			int new_data_len = data_len+(nUnzipLen-nContentLength);
-			char* new_http_content = calloc(1, new_data_len+32);
+			int new_data_len = content-http_content+nUnzipLen;
+			char* new_http_content = (char*)malloc(new_data_len+32);
 			if (new_http_content != NULL) {
 				int npos = content - http_content;
 				memcpy(new_http_content, http_content, npos);
@@ -1159,6 +1159,7 @@ int GetHttpData(char **data)
 				free(pPlain);
 				pPlain = NULL;
 				free(http_content);
+				http_content = NULL;
 				data_len = npos+1;
 				http_content = new_http_content;
 			} else {
@@ -1171,13 +1172,13 @@ int GetHttpData(char **data)
 	} else if (pSession->content_encoding==HTTP_CONTENT_ENCODING_COMPRESS) {
 		LOGERROR0("not support Content-Encoding = compress");
 	} else {
-		const char* htmlend = (const char*)memmem(content, nContentLength, "</html>", 7);
-		if (htmlend==NULL) htmlend= (const char*)memmem(content, nContentLength, "</HTML>", 7);
-		if (htmlend==NULL) htmlend= (const char*)memmem(content, nContentLength, "</Html>", 7);
-		if (htmlend != NULL) { 
-			nContentLength = htmlend-content+7;
-			content[nContentLength] = '\0';
-		}
+		//const char* htmlend = (const char*)memmem(content, nContentLength, "</html>", 7);
+		//if (htmlend==NULL) htmlend= (const char*)memmem(content, nContentLength, "</HTML>", 7);
+		//if (htmlend==NULL) htmlend= (const char*)memmem(content, nContentLength, "</Html>", 7);
+		//if (htmlend != NULL) { 
+		//	nContentLength = htmlend-content+7;
+		//	content[nContentLength] = '\0';
+		//}
 	}
 NOZIP:
 	CleanHttpSession(pSession);
