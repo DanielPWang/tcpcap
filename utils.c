@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdarg.h>
 #include <pthread.h>
 #include <sys/types.h>
@@ -137,7 +138,7 @@ int dtstr2time(const char *pszDate)
 /////////// LOG
 static char *_logfile = NULL;
 static FILE *_logfd = NULL;
-static size_t LOG_LENGTH_MAX = 2* 1024 * 1024 * 1024;
+static uint32_t LOG_LENGTH_MAX = 2* 1024 * 1024 * 1024;
 static pthread_mutex_t _loglock = PTHREAD_MUTEX_INITIALIZER;
 static int _level = 0;
 
@@ -368,5 +369,21 @@ int64_t htonll(int64_t n)
 int64_t ntohll(int64_t n)
 {
 	return (((int64_t)ntohl(n)) << 32) | ntohl(n >> 32);
+}
+
+const char* find_transfer_encoding_chunked_num_token(const char* p)
+{	// find "\r\nXXXX\r\n"
+	do {
+		const char* s = strstr(p, "\r\n");
+		const char* tmp = s;
+		if (s==NULL) break;
+		const char* e = strstr(s+2, "\r\n");
+		if (e==NULL) break;
+		s += 2;
+		while (isxdigit(*s)||isblank(*s)){++s;}
+		if (s == e) { return (tmp+2); }
+		p = e+2;
+	} while (1);
+	return NULL;
 }
 
