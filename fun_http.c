@@ -262,23 +262,23 @@ int NewHttpSession(const char* packet)
 	char tmp = *enter;
 	int cmdlinen = enter-content;
 	*enter = '\0';
+	// reuse and resend
+	for (int n=0; n<g_nMaxHttpSessionCount; ++n){
+		struct http_session* p = &_http_session[n];
+		if (p->flag >= HTTP_SESSION_FINISH) continue;
+		if (p->client.ip.s_addr == iphead->saddr && p->client.port==tcphead->source){
+			if (p->seq >= tcphead->seq) { return -3; }	// resend? first time, >= . why change to >?
+			p->flag = HTTP_SESSION_REUSED;
+			push_queue(_whole_content, p);
+			break;
+		}
+	}
 	{
 		char sip[16], dip[16];
 		LOGINFO("New session[%s:%u->%s:%u]: %s", 
 				inet_ntop(AF_INET, &iphead->saddr, sip, 16), ntohs(tcphead->source),
 				inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest),
 				cmdline);
-	}
-	//  reuse
-	for (int n=0; n<g_nMaxHttpSessionCount; ++n){
-		struct http_session* p = &_http_session[n];
-		if (p->flag >= HTTP_SESSION_FINISH) continue;
-		if (p->client.ip.s_addr == iphead->saddr && p->client.port==tcphead->source){
-			if (p->seq > tcphead->seq) { return -3; }	// resend?
-			p->flag = HTTP_SESSION_REUSED;
-			push_queue(_whole_content, p);
-			break;
-		}
 	}
 	
 	/*for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
@@ -742,7 +742,9 @@ void *HTTP_Thread(void* param)
 			INC_HTTP_GET_POST;
 			// TODO: need to process RST and FIN
 			int nRes = NewHttpSession(packet);
-			if (nRes == -1) {
+			if (nRes >= 0) {
+				INC_NEW_HTTP_SESSION;
+			} else if (nRes == -1) {
 				LOGERROR0("Query-Content is so short! Not insert into session.");
 				free((void*)packet);
 			} else if (nRes == -2) {

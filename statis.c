@@ -12,6 +12,7 @@ uint32_t sent_count = 0u;
 uint32_t whole_html_session = 0u;
 uint32_t drop_packet_count = 0u;
 uint32_t get_post_count = 0u;
+uint32_t new_http_session = 0u;
 uint32_t drop_http_image = 0u;
 
 #define P(x) printf("\t" #x " = %u\n", x)
@@ -21,6 +22,7 @@ void PrintStatis()
 	P(packets_pushed);
 	P(packets_pop);
 	P(get_post_count);
+	P(new_http_session);
 	P(sent_count);
 	P(whole_html_session);
 	P(drop_packet_count);
@@ -28,15 +30,16 @@ void PrintStatis()
 }
 void PrintTitle()
 {
-	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tGETPOST\tSEND\tWHOLE\tDROPPKT\n");
+	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tGETPOST\tNEWSESSION\tSEND\tWHOLE\tDROPPKT\n");
 }
 void PrintStati()
 {
 	time_t now = time(NULL);
 	char stime[64];
 	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
-	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, packets_pop,
-			sent_count, whole_html_session, drop_packet_count);
+	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
+			packets_pop, get_post_count, new_http_session, sent_count, 
+			whole_html_session, drop_packet_count);
 }
 void* _show_statis_thread(void* p)
 {
