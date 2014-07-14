@@ -196,7 +196,8 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	char *content = (void*)tcphead + tcphead->doff*4;
 
 	pIDL->flag = HTTP_SESSION_REQUESTING;
-	if (*(unsigned*)content==_get_image || *(unsigned*)content==_post_image || FLOW_GET(tcphead)==C2S) {
+	//if (*(unsigned*)content==_get_image || *(unsigned*)content==_post_image || FLOW_GET(tcphead)==C2S) {
+	if (memmem(packet, 5, "GET ", 4) == packet|| memmem(packet, 6, "POST ", 5) == packet || FLOW_GET(tcphead)==C2S) {
 		pIDL->client.ip.s_addr = iphead->saddr;
 		pIDL->server.ip.s_addr = iphead->daddr;
 		pIDL->client.port = tcphead->source;
@@ -327,60 +328,46 @@ int _insert_into_session(struct http_session* session, const char* packet)
 		next_tcp = TCPHDR(iphead);
 		next_content_len = next_tcp->window;
 
-		if (FLOW_GET(tcphead)==FLOW_GET(next_tcp) && (tcphead->seq <= next_tcp->seq)) { 
-			if (tcphead->seq == next_tcp->seq) {	// resend
-				LOGDEBUG("Resend. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+		if (FLOW_GET(tcphead)==FLOW_GET(next_tcp) && (tcphead->seq == next_tcp->seq)) { // resend
+				LOGDEBUG("Resend. Session[%u].%u packet.%s:%u.%u.%u.%u.%u => %s:%u", 
+						session->index,FRAME_NUM_GET(packet), 
 						inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
 						contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
 						inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
-				LOGDEBUG("Resend. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+				LOGDEBUG("Resend. Session[%u].%u next.%s:%u.%u.%u.%u.%u => %s:%u", 
+						session->index,FRAME_NUM_GET(packet), 
 						inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
 						next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
 						inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
 				LOGINFO("Drop packet - Resend. Session[%u]", session->index);
-			} else if (tcphead->seq < next_tcp->seq) {	// out of order
-				if (prev == NULL) {
-					LOGFATAL0("Never get here.");
-					LOGDEBUG("Never get here. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
-							inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
-							contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
-							inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
-					LOGDEBUG("Never get here. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
-							inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
-							next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
-							inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
-					return -1;
-				} else {
-					LOGDEBUG("Fix order. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
-							inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
-							contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
-							inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
-					LOGDEBUG("Fix order. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
-							inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
-							next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
-							inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
-					*(const char**)prev = packet;
-					*(const char**)packet = next;
-				}
-			} else {
-				LOGFATAL0("Never get here.");
-				LOGFATAL("Never get here. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+				break;
+		} else if (FLOW_GET(tcphead)==FLOW_GET(next_tcp) && tcphead->seq < next_tcp->seq) {	// out of order
+				LOGDEBUG("Fix order. Session[%u].%u packet.%s:%u.%u.%u.%u.%u => %s:%u", 
+						session->index,FRAME_NUM_GET(packet), 
 						inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
 						contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
 						inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
-				LOGFATAL("Never get here. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+				LOGDEBUG("Fix order. Session[%u].%u next.%s:%u.%u.%u.%u.%u => %s:%u", 
+						session->index,FRAME_NUM_GET(packet), 
 						inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
 						next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
 						inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
-				return -1;
-			}
-			break;
-		} else if (FLOW_GET(tcphead)!=FLOW_GET(next_tcp) && (tcphead->seq <= next_tcp->ack_seq)) { // resend
-			LOGDEBUG("Fix order. Session[%u] packet.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+				if (prev == NULL) {
+					*(const char**)packet = next;
+					session->data = (void*)packet;
+				} else {
+					*(const char**)prev = packet;
+					*(const char**)packet = next;
+				}
+				break;
+		} else if (FLOW_GET(tcphead)!=FLOW_GET(next_tcp) && (tcphead->seq+tcphead->window <= next_tcp->ack_seq)) { // resend
+			LOGDEBUG("Fix order. Session[%u].%u packet.%s:%u.%u.%u.%u.%u => %s:%u", 
+					 session->index,FRAME_NUM_GET(packet),
 					inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
 					contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
 					inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
-			LOGDEBUG("Fix order. Session[%u] next.%s:%u.%u.%u.%u.%u => %s:%u", session->index,
+			LOGDEBUG("Fix order. Session[%u].%u next.%s:%u.%u.%u.%u.%u => %s:%u", 
+					session->index,FRAME_NUM_GET(packet), 
 					inet_ntop(AF_INET, &next_ip->saddr, sip, 32), ntohs(next_tcp->source),
 					next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
 					inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
@@ -399,6 +386,11 @@ int _insert_into_session(struct http_session* session, const char* packet)
 		return 0;
 	}
 	LOGFATAL0("Never get here.");
+	LOGERROR("Never get here. Session[%u].%u packet.%s:%u.%u.%u.%u.%u => %s:%u", 
+			session->index,FRAME_NUM_GET(packet), 
+			inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
+			contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
+			inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
 	return -1;
 }
 
@@ -665,6 +657,7 @@ int AppendResponse(const char* packet)
 		free((void*)packet);
 		return HTTP_APPEND_SUCCESS;
 	}
+	if (*(uint32_t*)content==_http_image) INC_HTTP_IMAGE;
 	int flow = FLOW_GET(tcphead);
 
 	char sip[32],dip[32];

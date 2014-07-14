@@ -84,6 +84,8 @@ void* LoadHost(char* hostsbuff);
 #define UDPHDR(ippacket) (struct udphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
 #define FLOW_SET(tcphead, x) (tcphead->check = (x))
 #define FLOW_GET(tcphead) (tcphead->check)
+#define FRAME_NUM_SET(packet) (*(uint32_t*)packet = packet_num++)
+#define FRAME_NUM_GET(packet) (*(uint32_t*)packet)
 
 #endif
 

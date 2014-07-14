@@ -3,7 +3,7 @@ OUTDIR = build/
 CC = /home/daniel/gcc447/bin/gcc
 
 ifdef RELEASE
-	CFLAGS = -Wall -O1 -pg
+	CFLAGS = -Wall -O2 -fomit-frame-pointer -march=prescott
 else
 	CFLAGS = -ggdb -O0 -pg
 endif

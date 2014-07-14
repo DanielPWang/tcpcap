@@ -147,6 +147,7 @@ int main(int argc, char* argv[])
 		if (nrecv == 0) continue;
 
 		INC_TOTAL_PCAP;
+		FRAME_NUM_SET(buffer);
 
 		struct ether_header *ehead = (struct ether_header*)buffer;
 		u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
