@@ -196,8 +196,8 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	char *content = (void*)tcphead + tcphead->doff*4;
 
 	pIDL->flag = HTTP_SESSION_REQUESTING;
-	//if (*(unsigned*)content==_get_image || *(unsigned*)content==_post_image || FLOW_GET(tcphead)==C2S) {
-	if (memmem(packet, 5, "GET ", 4) == packet|| memmem(packet, 6, "POST ", 5) == packet || FLOW_GET(tcphead)==C2S) {
+	if (*(unsigned*)content==_get_image || *(unsigned*)content==_post_image || FLOW_GET(tcphead)==C2S) {
+	//if (memmem(packet, 5, "GET ", 4) == packet|| memmem(packet, 6, "POST ", 5) == packet || FLOW_GET(tcphead)==C2S) {
 		pIDL->client.ip.s_addr = iphead->saddr;
 		pIDL->server.ip.s_addr = iphead->daddr;
 		pIDL->client.port = tcphead->source;
@@ -208,7 +208,7 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 		pIDL->client.port = tcphead->dest;
 		pIDL->server.port = tcphead->source;
 	} else {
-		LOGFATAL0("Cannt get here!");
+		LOGFATAL("Cannt get here! %u.", FRAME_NUM_GET(packet));
 	}
 	pIDL->create = *tv;
 	pIDL->update = *tv;
@@ -242,7 +242,7 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	// TODO:
 	pIDL->prev = NULL;
 	pIDL->next = NULL;
-	LOGTRACE("Session[%d] NewHttpSession", pIDL->index);
+	LOGTRACE("Session[%d] NewHttpSession.%u.", pIDL->index, FRAME_NUM_GET(packet));
 }
 char* _IGNORE_EXT[] = { ".gif", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
 int NewHttpSession(const char* packet)
@@ -278,7 +278,7 @@ int NewHttpSession(const char* packet)
 	}
 	{
 		char sip[16], dip[16];
-		LOGINFO("New session[%s:%u->%s:%u]: %s", 
+		LOGINFO("New session.%u.[%s:%u->%s:%u]: %s", FRAME_NUM_GET(packet),
 				inet_ntop(AF_INET, &iphead->saddr, sip, 16), ntohs(tcphead->source),
 				inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest),
 				cmdline);
@@ -426,7 +426,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		LOGTRACE("Session[%d] be reset.", index);
 		pSession->flag = HTTP_SESSION_RESET;
 		push_queue(_whole_content, pSession);
-		if (contentlen > 0) { LOGERROR("Session[%d].len = %u. droped.", contentlen); }
+		if (contentlen > 0) { LOGERROR("Session[%d].len = %u. .%u.droped.", index, contentlen, FRAME_NUM_GET(pPacket)); }
 		free((void*)pPacket);
 		return HTTP_APPEND_SUCCESS;
 	} else if (tcphead->fin) {
@@ -697,7 +697,7 @@ int AppendResponse(const char* packet)
 	if (nRs == HTTP_APPEND_FAIL || index == g_nMaxHttpSessionCount) {
 		// TODO: another new session
 		char sip[20], dip[20], stip[20], dtip[20];
-		LOGINFO("Cannt find session. drop. %s:%d.%u.%u => %s:%d\n%s", 
+		LOGINFO("Cannt find session. drop. .%u.%s:%d.%u.%u => %s:%d\n%s", FRAME_NUM_GET(packet),
 				inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
 				tcphead->seq, tcphead->ack_seq,
 				inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest),
@@ -740,7 +740,7 @@ void *HTTP_Thread(void* param)
 			if (nRes >= 0) {
 				INC_NEW_HTTP_SESSION;
 			} else if (nRes == -1) {
-				LOGERROR0("Query-Content is so short! Not insert into session.");
+				LOGERROR("%u.Query-Content is so short! Not insert into session.", FRAME_NUM_GET(packet));
 				free((void*)packet);
 			} else if (nRes == -2) {
 				INC_DROP_PACKET;
@@ -756,7 +756,7 @@ void *HTTP_Thread(void* param)
 			} else if (nRes == -3) {
 				char sip[16],dip[16];
 				content[tcphead->window] = '\0';
-				LOGWARN("Resend Query? may be duplicate.%s:%u.%u.%u.%u->%s:%u. \n%s",
+				LOGWARN("Resend Query? may be duplicate.%u.%s:%u.%u.%u.%u->%s:%u. \n%s", FRAME_NUM_GET(packet),
 						inet_ntop(AF_INET, &iphead->saddr, sip, 16), ntohs(tcphead->source),
 						tcphead->seq, tcphead->ack_seq, tcphead->window,
 						inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest), content);
@@ -865,7 +865,7 @@ int HttpInit()
 int PushHttpPack(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead)
 {	
 	struct timeval *tv = (struct timeval*)buffer;
-	gettimeofday(tv, NULL);
+	if (!DEBUG) gettimeofday(tv, NULL);
 	int err = 0;
 DEBUG_LOOP:
 	err = push_queue(_packets, (const void*) buffer);
