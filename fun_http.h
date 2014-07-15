@@ -9,23 +9,38 @@ enum HTTP_SESSION_FLAGS {
 	HTTP_SESSION_IDL, 
 	HTTP_SESSION_REQUESTING,
 	HTTP_SESSION_REQUEST, 
-	HTTP_SESSION_REPONSE, 
 	HTTP_SESSION_RESPONSEING,
-	HTTP_SESSION_FINISH
+	HTTP_SESSION_REPONSE, 
+	HTTP_SESSION_REPONSE_ENTITY, 
+	HTTP_SESSION_FINISH,
+	HTTP_SESSION_REUSED,
+	HTTP_SESSION_RESET,
+	HTTP_SESSION_BROKEN,
+	HTTP_SESSION_TIMEOUT,
+	HTTP_SESSION_UNKNOWN
 };
 
 enum HTTP_TRANSFER_FLAGS { 
-	HTTP_TRANSFER_INIT,
 	HTTP_TRANSFER_NONE,
 	HTTP_TRANSFER_HAVE_CONTENT_LENGTH, 
 	HTTP_TRANSFER_CHUNKED,
-	HTTP_TRANSFER_WITH_HTML_END,
+	HTTP_TRANSFER_OTHER,
 	HTTP_TRANSFER_FILE
+};
+
+enum HTTP_CONTENT_ENCODING {
+	HTTP_CONTENT_ENCODING_NONE,
+	HTTP_CONTENT_ENCODING_GZIP,
+	HTTP_CONTENT_ENCODING_COMPRESS,
+	HTTP_CONTENT_ENCODING_DEFLATE
 };
 
 enum HTTP_CONTENT_TYPE { 
 	HTTP_CONTENT_NONE,
 	HTTP_CONTENT_HTML,
+	HTTP_CONTENT_FILE,
+	HTTP_CONTENT_JSCRIPT,
+	HTTP_CONTENT_IMAGE,
 	HTTP_CONTENT_RES,
 	HTTP_CONTENT_FILE_PDF,
 	HTTP_CONTENT_FILE_KDH,
@@ -42,11 +57,13 @@ enum HTTP_CONTENT_TYPE {
 };
 
 enum HTTP_APPEND_STATUS { 
-	HTTP_APPEND_DROP_PACKET = -1,
+	HTTP_APPEND_FAIL= -1,
 	HTTP_APPEND_ADD_PACKET = 0,
 	HTTP_APPEND_ADD_PACKET_LATER,
 	HTTP_APPEND_FINISH_LATER,
-	HTTP_APPEND_FINISH_CURRENT
+	HTTP_APPEND_FINISH_CURRENT,
+	HTTP_APPEND_SUCCESS,
+	HTTP_APPEND_REUSE
 };
 
 enum HTTP_SESSION_FINISH_TYPE { 
@@ -67,23 +84,14 @@ enum HTTP_SPECIAL_STATE {
 
 // int isHTTP(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int HttpInit();
-int FilterPacketForHttp(int nFdIndex, const char* buffer, int nBufferLen, const struct iphdr* iphead, const struct tcphdr* tcphead);
-int IsConfigPort(struct hosts_t *pServer);
+int HttpStop();
+int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
-int TransGzipData(const char *pGzipData, int nDataLen, char **pTransData);
-int AppendServerToClient(int nThreadIndex, int nIndex, const char* pPacket, int bIsCurPack, int nIsForceRestore);
-int AppendClientToServer(int nThreadIndex, int nIndex, const char* pPacket);
-int AppendReponse(int nThreadIndex, const char* packet);
-int AppendLaterPacket(int nThreadIndex, int nIndex, int nIsForceRestore);
-void ShowOpLogInfo(int bIsPrintScreen);
-void StopHttpThread();
-
-void LogDropSessionData(const char *pszDropType, const struct tcp_session *pSession);
-void LogDataItems(const struct tcp_session *pSession, int nState, int nDataSize);
-void SessionTimeoutProcess();
-
-
+uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData, int gz);
+int AppendServerToClient(int nIndex, const char* pPacket);
+int AppendClientToServer(int nIndex, const char* pPacket);
+int AppendResponse(const char* packet);
 
 #endif
 

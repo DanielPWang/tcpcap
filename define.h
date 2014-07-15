@@ -2,23 +2,25 @@
 #define __DEFINE_H__
 
 #define VER_MAJOR 1
-#define VER_MINOR 2
-#define VER_PATCH 10
+#define VER_MINOR 0
+#define VER_PATCH 8
 
-
-#define MONITOR_COUNT 7
-#define MAX_SESSION_THREAD_COUNT 10
+#define MONITOR_COUNT 5
 
 // configure
-#define CONFIG_PATH_FILE "/config/agent.conf"
+#define CONFIG_PATH_FILE "./config/agent.conf"
 #define HTTP_HOST_PATH_FILE "./config/http_host_ip.lst"
 #define EXCLUDE_HOST_PATH_FILE "./config/exclude_host_ip.lst"
 #define VALUE_LENGTH_MAX  (1024*60)
+
+#define HTTP_PROCESS_THREADS 1
 extern const char* CONFIG_PATH;
+extern int DEBUG;
 
 // capture
-#define RECV_BUFFER_LEN   4500 // 8192
+#define RECV_BUFFER_LEN   4000 // 8192
 
+#define MAX_BLOCK_ITEM 500
 // HTTP
 #define MAX_HTTP_SESSIONS 6000
 #define MAX_HTTP_PACKETS  20000
@@ -36,14 +38,8 @@ extern const char* CONFIG_PATH;
 #define MAX_FLOW_RESPONSE_CLIENT  500
 #define FLOW_SEND_INTERVAL_TIME   60
 
-#define LOG_OP_INTERVAL   300
-#define SESSION_TIMEOUT_PROC_INTERVAL   5
-
 // server
 #define SERVER_PORT 2012
-
-//block
-#define MAX_BLOCK_ITEM  500
 
 // share memory
 #define SHMKEY 0x889900

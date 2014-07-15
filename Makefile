@@ -1,17 +1,17 @@
 TARGET = eru_agent
 OUTDIR = build/
-CC = gcc34
+CC = /home/daniel/gcc447/bin/gcc
 
 ifdef RELEASE
-	CFLAGS = -Wall -O1
+	CFLAGS = -Wall -O2 -fomit-frame-pointer -march=prescott
 else
-	CFLAGS = -ggdb -O0 
+	CFLAGS = -ggdb -O0 -pg
 endif
 
-CFLAGS += -D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 
-CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99
+# CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99
+CFLAGS += -fPIC -march=core2 -DVER_SVNID=9  -std=gnu99 -D_GNU_SOURCE
 	
-LINKFLAGS = -Wl,-rpath,. -rdynamic
+LINKFLAGS = -Wl,-rpath,. -rdynamic -pg
 # LINKFLAGS = -Wl,-rpath,. -shared -shared-libgcc
 
 INCDIR = -I../ -I./
@@ -21,9 +21,11 @@ INCFILES = $(wildcard *.h)
 SRCFILES = $(wildcard *.c)
 OBJFILES = $(patsubst %.c,$(OUTDIR)%.o,$(SRCFILES))
 
-LIBRARYS = -lpthread -lz
+LIBRARYS = -lpthread -lz -lpcap  
 
 all: $(OUTDIR) $(TARGET)
+	#@cp -af config ~/agent/
+	@cp -f $(TARGET) ~/agent
 	@echo 'End compiling. $(shell date +"%F %T")'
 
 $(OUTDIR):

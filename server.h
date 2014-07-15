@@ -20,13 +20,13 @@
 #define MSG_TYPE_RES_OK 0xFF
 
 #define CLIENT_SOCKET_PORT 22012
-#define CLIENT_SOCKET_PORT_MIN 20001
-#define CLIENT_SOCKET_PORT_MAX 20020
+
+// TODO: setupid.
 #define CLIENT_CONFIG_SOCKET_PORT 22013
 #define CLIENT_TEST_SOCKET_PORT 22014
 #define CLIENT_FLOW_SOCKET_PORT 22015
 
-#define SELECT_TIMEOUT 10000
+#define SELECT_TIMEOUT 30000
 
 struct msg_head
 {
@@ -38,23 +38,6 @@ struct msg_head
 int InitServer();
 int StartServer();
 void StopServer();
-
-int SetupTCPServer(int server_port);
-int Unblock(int sock);
-int ClientSocketIsValid();
-int WriteSocketData(int sock, const void *pBuffer, int nWriteSize);
-int ReadSocketData(int sock, char *pBuffer, int nReadSize);
-int RecvData(int sock, struct msg_head *pMsgHead, char **pData);
-int SendData(int sock, unsigned char msg_type, const void *pData, unsigned int data_length);
-int ProcessReqGetIpList();
-int ProcessReqSetIpList(const char *pRecvData);
-int ProcessClientSockRes();
-int ProcessClientSockReq();
-int ProcessClientCfgSockReq();
-int ProcessServerSockReq();
-int LocalCacheFile();
-void CloseCacheFile();
-int RebootServerThread();
 
 #endif
 

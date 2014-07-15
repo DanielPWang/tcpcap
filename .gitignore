@@ -1,2 +1,6 @@
-cscope.*
+eru_agent
+build
+cscope*
 tags
+*.orig
+vim.session

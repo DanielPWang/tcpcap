@@ -7,6 +7,13 @@
 
 #define CONF_NAME_LEN 128
 
+int GetValue_i(const char* confname, const char* name)
+{
+	char value[32];
+	if (GetValue(confname, name, value, sizeof(value)) == NULL) return 0;
+	return atoi(value);
+}
+
 char* GetValue(const char* confname, const char* name, char* value, size_t len)
 {
 	assert(value!=NULL && len!=0);
@@ -50,10 +57,8 @@ int GetFileData(const char* pszFileName, char* pszFileData, int nMaxLen)
 	
 	FILE *pFile = NULL;
 	pFile = fopen(pszFileName, "r");
-	if (pFile != NULL) 
-	{
-		while (!feof(pFile))
-		{
+	if (pFile != NULL) {
+		while (!feof(pFile)) {
 			if (nReadTotal+BUFFER_MAX_LEN > nMaxLen)
 				nReadBufferLen = nMaxLen - nReadTotal;
 			
@@ -66,6 +71,9 @@ int GetFileData(const char* pszFileName, char* pszFileData, int nMaxLen)
 
 		pszFileData[nReadTotal] = '\0';
 		fclose(pFile);
+	} else {
+		LOGFATAL("'%s' dont exist.", pszFileName);
+		ASSERT(0);
 	}
 
 	return nReadTotal;

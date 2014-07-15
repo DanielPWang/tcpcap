@@ -20,6 +20,10 @@
 #include <define.h>
 #include <utils.h>
 #include <block.h>
+#include <define.h>
+#if MEMWATCHDEF
+#include <memwatch.h>
+#endif
 
 static int g_block_socket = -1;
 static int g_bIsExistMac = 0;
@@ -41,10 +45,10 @@ int InitBlockProc()
 	}
 
 	char szBlock[10] = {0};
-	GetValue(CONFIG_PATH, "block", szBlock, 6);
+	GetValue(CONFIG_PATH_FILE, "block", szBlock, 6);
 
 	char szDescMac[30] = {0};
-	if (GetValue(CONFIG_PATH, "block_dest_mac", szDescMac, 29) != NULL)
+	if (GetValue(CONFIG_PATH_FILE, "block_dest_mac", szDescMac, 29) != NULL)
 	{
 		if (strcmp(szDescMac, "00-00-00-00-00-00") != 0)
 		{
@@ -62,20 +66,20 @@ int InitBlockProc()
 
 			printf("Block dest mac is config to %x-%x-%x-%x-%x-%x \n", 
 				g_destMac[0], g_destMac[1], g_destMac[2], g_destMac[3], g_destMac[4], g_destMac[5]);
-			LOGFIX("Block dest mac is config to %x-%x-%x-%x-%x-%x \n", 
+			LOGINFO("Block dest mac is config to %x-%x-%x-%x-%x-%x \n", 
 				g_destMac[0], g_destMac[1], g_destMac[2], g_destMac[3], g_destMac[4], g_destMac[5]);
 			
 			g_bIsExistMac = 1;	
 		}
 		else
 		{
-			LOGWARN("Block dest mac is not config!", CONFIG_PATH);
+			LOGWARN("Block dest mac is not config!", CONFIG_PATH_FILE);
 			printf("Block dest mac is not config!\n");
 		}
 	}
 	else
 	{
-		LOGWARN("Block dest mac is not config!", CONFIG_PATH);
+		LOGWARN("Block dest mac is not config!", CONFIG_PATH_FILE);
 		printf("Block dest mac is not config!\n");
 	}
 	
@@ -532,8 +536,7 @@ CalcIPSum(unsigned short * w, int blen)
 	return (unsigned short) (~cksum);
 }
 
-unsigned short
-CalcTCPSum(unsigned short *h, unsigned short * d, int dlen)
+unsigned short CalcTCPSum(unsigned short *h, unsigned short * d, int dlen)
 {
 	unsigned int cksum;
 	unsigned short answer=0;
