@@ -65,7 +65,7 @@ extern int _block_func_on;
 // IDL -> REQUESTING -> REQUEST -> REPONSEING -> REPONSE -> FINISH
 //           |------------|------------|------------------> TIMEOUT
 volatile int _http_living = 1;
-volatile time_t _http_active = 0;
+time_t _http_active = 0;
 static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
@@ -174,7 +174,7 @@ void *_process_timeout(void* p)
 
 		for (int index = 0; index < g_nMaxHttpSessionCount; ++index)	{
 			struct http_session* session = &_http_session[index];
-			if ( session->flag < HTTP_SESSION_FINISH ) {
+			if ( session->flag>HTTP_SESSION_IDL && session->flag<HTTP_SESSION_FINISH ) {
 				if (_http_active-session->update.tv_sec > g_nHttpTimeout) {
 					LOGWARN("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, session->update, g_nHttpTimeout, session->flag);
@@ -317,7 +317,7 @@ int _insert_into_session(struct http_session* session, const char* packet)
 	ASSERT(contentlen > 0);
 
 	const char* head = session->data;
-	const char* next = *(const char**)head;
+	const char* next = head;
 	const char* prev = NULL;
 	struct iphdr *next_ip ;
 	struct tcphdr *next_tcp ;
@@ -325,7 +325,7 @@ int _insert_into_session(struct http_session* session, const char* packet)
 	char sip[32], dip[32];
 	for (; next!=NULL; next=*(const char**)next) {
 		next_ip = IPHDR(next);
-		next_tcp = TCPHDR(iphead);
+		next_tcp = TCPHDR(next_ip);
 		next_content_len = next_tcp->window;
 
 		if (FLOW_GET(tcphead)==FLOW_GET(next_tcp) && (tcphead->seq == next_tcp->seq)) { // resend
@@ -413,6 +413,8 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		} else {
 			return HTTP_APPEND_FAIL;
 		}
+	} else if (contentlen==0 && tcphead->seq<pSession->ack) {
+		// nothing
 	} else {
 		pSession->seq = tcphead->ack_seq;
 		pSession->ack = tcphead->seq;
@@ -585,6 +587,8 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 		} else {
 			return HTTP_APPEND_FAIL;
 		}
+	} else if (contentlen==0 && tcphead->seq<pSession->seq) {
+		// nothing
 	} else {
 		pSession->seq = tcphead->seq;
 		pSession->ack = tcphead->ack_seq;
@@ -722,6 +726,7 @@ void *HTTP_Thread(void* param)
 		iphead->tot_len = ntohs(iphead->tot_len);
 		int contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
 		tcphead->window = contentlen;
+		_http_active = tv->tv_sec;
 
 		if ((tcphead->syn&&contentlen<=0) || contentlen>=RECV_BUFFER_LEN) { 
 			free((void*)packet); 
@@ -779,6 +784,7 @@ int HttpStop()
 {
 	while (DEBUG) {	// TODO: I want to process all packets.
 		if (len_queue(_packets)==0 && len_queue(_whole_content)==0) break;
+		_http_active += g_nHttpTimeout/5;
 		sleep(1);
 	}
 	_http_living = 0;

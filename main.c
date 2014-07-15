@@ -140,7 +140,7 @@ int main(int argc, char* argv[])
 	
 	while (Living) 
 	{
-		if (buffer == NULL) buffer = malloc( RECV_BUFFER_LEN); // TODO:
+		if (buffer == NULL) buffer = calloc( 8, RECV_BUFFER_LEN/8); // TODO:
 		if (buffer == NULL) { LOGWARN0("no memory!"); sleep(1); continue; }
 
 		nrecv = CapturePacket(buffer, RECV_BUFFER_LEN);
