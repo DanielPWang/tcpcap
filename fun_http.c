@@ -270,10 +270,21 @@ int NewHttpSession(const char* packet)
 		if (p->client.ip.s_addr == iphead->saddr && p->client.port==tcphead->source){
 			struct iphdr* hdip = IPHDR(p->data);
 			struct tcphdr* hdtcp=TCPHDR(hdip);
-			if (hdtcp->seq >= tcphead->seq) { return -3; }	// resend? first time, >= . why change to >?
-			p->flag = HTTP_SESSION_REUSED;
-			push_queue(_whole_content, p);
-			break;
+			if (FLOW_GET(hdtcp)==C2S) {
+				if (hdtcp->seq == tcphead->seq) { // resend
+					return -3; 
+				} else if (hdtcp->seq > tcphead->seq) {
+					if (_insert_into_session(p, packet) != 0) { 
+						return -3;
+					} else {
+						return p->index;
+					}
+				} else {
+					p->flag = HTTP_SESSION_REUSED;
+					push_queue(_whole_content, p);
+					break;
+				}
+			}
 		}
 	}
 	{
@@ -340,7 +351,7 @@ int _insert_into_session(struct http_session* session, const char* packet)
 						next_content_len, next_tcp->seq, next_tcp->ack_seq, FLOW_GET(next_tcp),
 						inet_ntop(AF_INET, &next_ip->daddr, dip, 32), ntohs(next_tcp->dest));
 				LOGINFO("Drop packet - Resend. Session[%u]", session->index);
-				break;
+				return -1;
 		} else if (FLOW_GET(tcphead)==FLOW_GET(next_tcp) && tcphead->seq < next_tcp->seq) {	// out of order
 				LOGDEBUG("Fix order. Session[%u].%u packet.%s:%u.%u.%u.%u.%u => %s:%u", 
 						session->index,FRAME_NUM_GET(packet), 
@@ -359,6 +370,7 @@ int _insert_into_session(struct http_session* session, const char* packet)
 					*(const char**)prev = packet;
 					*(const char**)packet = next;
 				}
+				return 0;
 				break;
 		} else if (FLOW_GET(tcphead)!=FLOW_GET(next_tcp) && (tcphead->seq+tcphead->window <= next_tcp->ack_seq)) { // resend
 			LOGDEBUG("Fix order. Session[%u].%u packet.%s:%u.%u.%u.%u.%u => %s:%u", 
@@ -378,19 +390,12 @@ int _insert_into_session(struct http_session* session, const char* packet)
 				*(const char**)prev = packet;
 				*(const char**)packet = next;
 			}
+			return 0;
 			break;
 		}
 		prev = next;
 	}
-	if (next_tcp!=NULL){
-		return 0;
-	}
-	LOGFATAL0("Never get here.");
-	LOGERROR("Never get here. Session[%u].%u packet.%s:%u.%u.%u.%u.%u => %s:%u", 
-			session->index,FRAME_NUM_GET(packet), 
-			inet_ntop(AF_INET, &iphead->saddr, sip, 32), ntohs(tcphead->source),
-			contentlen, tcphead->seq, tcphead->ack_seq, FLOW_GET(tcphead),
-			inet_ntop(AF_INET, &iphead->daddr, dip, 32), ntohs(tcphead->dest));
+	ASSERT(next_tcp!=NULL);
 	return -1;
 }
 
@@ -772,6 +777,15 @@ void *HTTP_Thread(void* param)
 
 		int nIndex = AppendResponse(packet);
 		if (nIndex == HTTP_APPEND_FAIL) {
+			if (FLOW_GET(tcphead)==C2S) { // may be another New Session
+				struct http_session* pIDL = NULL;
+LOOP_DEBUG:
+				pIDL = (struct http_session*)pop_queue_timedwait(_idl_session);
+				if (DEBUG && pIDL==NULL) {	goto LOOP_DEBUG; }	// For test
+				if (pIDL != NULL) {
+					_init_new_http_session(pIDL, packet);
+				}
+			}
 			if (*cmd == _http_image) INC_DROP_HTTP_IMAGE;
 			free((void*)packet); // LOGDEBUG0("cannt find session");
 		}
