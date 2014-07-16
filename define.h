@@ -24,7 +24,7 @@ extern int DEBUG;
 // HTTP
 #define MAX_HTTP_SESSIONS 6000
 #define MAX_HTTP_PACKETS  20000
-#define HTTP_TIMEOUT      55	// s
+#define HTTP_TIMEOUT      8	// s
 //#define MAX_HTTP_SESSIONS 2000
 //#define MAX_HTTP_PACKETS  5000
 //#define HTTP_TIMEOUT      25	// s

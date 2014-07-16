@@ -29,39 +29,24 @@ struct http_session
 {
 	struct hosts_t client;		// assume
 	struct hosts_t server;
-	uint32_t flag;		// ACK,SYN,FIN,RST,IDL,S1,S2,S3
+	uint32_t index;
+	uint32_t flag;		// HTTP_SESSION_???
 	uint32_t seq;		// client
 	uint32_t ack;		// client
 	uint32_t transfer_flag;
-	uint32_t response_head_recv_flag;  // 1:recv ok; 0:default
 	uint32_t content_encoding;	   // 1:gzip; 0:no encoding
 	uint32_t content_type;			   // 0:no match; 1:html; 2:file
-	uint32_t finish_type;
-	uint32_t force_restore_flag;
-	uint32_t contentlen;
+	uint32_t contentlen;	// len of last packet
 	uint32_t http_content_length;
-	uint32_t res2;
-	uint32_t res_true_len;
-	uint32_t later_pack_size;
-	uint32_t index;
-	uint32_t cur_content_len;
-	uint32_t part_content_len;
 	struct timeval create;	// first
-	struct timeval update;		// the lasttime update. TODO: time_t
+	struct timeval update;	// the lasttime update. TODO: time_t
 	struct line_t query_url;
 	struct line_t http;
+	char* response_head;
+	uint32_t response_head_len;	
 	void *data;
 	void *lastdata;
-	void *pack_later;
-	void *last_pack_later;
-	char *request_head;
-	char *response_head;
-	//char *cur_content;
-	//char *part_content;
-	uint32_t request_head_len;
-	uint32_t request_head_len_valid_flag;
-	uint32_t response_head_len;
-	uint32_t response_head_gen_time;
+	uint32_t packet_num;	// count of packets [data]
 
 	struct http_session *prev;
 	struct http_session *next;

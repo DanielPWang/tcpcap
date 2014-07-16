@@ -103,6 +103,7 @@ struct _type_content_t CONTENT_TYPE[] = {
 	{ HTTP_CONTENT_FILE, "bibtex", 6},
 	{ HTTP_CONTENT_FILE, "x-no-such-app", 13} // ...rtf ms-excel postscript ms-word
 };
+int _insert_into_session(struct http_session* session, const char* packet);
 // #include "fun_http_sessions.inc"
 
 // TODO: 
@@ -135,26 +136,6 @@ struct http_session* CleanHttpSession(struct http_session* pSession)
 
 		LOGTRACE("Session[%d] clean packet data successfully!", pSession->index);
 		
-		packet = pSession->pack_later;
-		while (packet!=NULL) {
-			void* tmp = packet;
-			packet = *(void**)packet;
-			free(tmp);
-		}
-
-		LOGTRACE("Session[%d] clean packet_later data successfully!", pSession->index);
-		
-		if (pSession->request_head!=NULL) { free(pSession->request_head);}
-
-		if (pSession->response_head!=NULL) { free(pSession->response_head);}
-		// TODO: add by jrl why?
-		//if (pSession->cur_content!=NULL) { free(pSession->cur_content); pSession->cur_content = NULL; }
-		
-		//if (pSession->part_content!=NULL) { free(pSession->part_content); pSession->part_content = NULL; }
-		// END
-		
-		LOGTRACE("Session[%d] clean response_head successfully!", pSession->index);
-		
 		bzero(pSession, sizeof(*pSession));
 		pSession->index = index;
 		pSession->flag = HTTP_SESSION_IDL;
@@ -177,7 +158,7 @@ void *_process_timeout(void* p)
 			if ( session->flag>HTTP_SESSION_IDL && session->flag<HTTP_SESSION_FINISH ) {
 				if (_http_active-session->update.tv_sec > g_nHttpTimeout) {
 					LOGWARN("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
-							index, _http_active, session->update, g_nHttpTimeout, session->flag);
+							index, _http_active, session->update.tv_sec, g_nHttpTimeout, session->flag);
 					session->flag = HTTP_SESSION_TIMEOUT;
 					push_queue(_whole_content, session);
 					break;
@@ -219,15 +200,9 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	pIDL->lastdata = (void*)packet;
 	pIDL->contentlen = contentlen;
 	pIDL->http_content_length = 0;
-	pIDL->res2 = 0;
 	pIDL->transfer_flag = HTTP_TRANSFER_NONE;
-	pIDL->response_head_recv_flag = 0;
 	pIDL->content_encoding = HTTP_CONTENT_ENCODING_NONE;
 	pIDL->content_type = HTTP_CONTENT_NONE;
-	pIDL->response_head = NULL;
-	pIDL->response_head_gen_time = 0;
-	pIDL->response_head_len = 0;
-	pIDL->request_head_len_valid_flag = 0;
 	*(const char**)packet = NULL;
 	if ((*(unsigned*)content==_get_image)
 			&& content[contentlen-4]=='\r' && content[contentlen-3]=='\n'
@@ -818,24 +793,16 @@ int HttpInit()
 	if (GetValue(CONFIG_PATH, "SendErrStateDataFlag", szSendErrStateDataFlag, 2) != NULL)
 		g_nSendErrStateDataFlag = atoi(szSendErrStateDataFlag);
 	
-	char szMaxSessionCount[10] = {0};
-	char szMaxPacketCount[10] = {0};
-	char szHttpTimeout[10] = {0};
-	GetValue(CONFIG_PATH, "max_session_count", szMaxSessionCount, 6);
-	GetValue(CONFIG_PATH, "max_packet_count", szMaxPacketCount, 6);
-	GetValue(CONFIG_PATH, "http_timeout", szHttpTimeout, 3);
-	
-	g_nMaxHttpSessionCount = atoi(szMaxSessionCount);
+	g_nMaxHttpSessionCount = GetValue_i(CONFIG_PATH, "max_session_count");
 	if (g_nMaxHttpSessionCount < 500 || g_nMaxHttpSessionCount > 100000)
 		g_nMaxHttpSessionCount = MAX_HTTP_SESSIONS;
 	
-	g_nMaxHttpPacketCount = atoi(szMaxPacketCount);
+	g_nMaxHttpPacketCount = GetValue_i(CONFIG_PATH, "max_packet_count");
 	if (g_nMaxHttpPacketCount < 1000 || g_nMaxHttpPacketCount > 200000)
 		g_nMaxHttpPacketCount = MAX_HTTP_PACKETS;
 	
-	g_nHttpTimeout = atoi(szHttpTimeout);
-	if (g_nHttpTimeout < 10 || g_nHttpTimeout > 600)
-		g_nHttpTimeout = HTTP_TIMEOUT;
+	g_nHttpTimeout = GetValue_i(CONFIG_PATH, "http_timeout");
+	if (g_nHttpTimeout < 10 ) g_nHttpTimeout = HTTP_TIMEOUT;
 
 	printf("max_http_session_count = %d\n", g_nMaxHttpSessionCount);
 	printf("max_http_packet_count = %d\n", g_nMaxHttpPacketCount);
