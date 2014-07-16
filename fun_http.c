@@ -545,6 +545,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		*(const char**)pPacket = NULL;
 		*(const char**)pSession->lastdata = pPacket;
 		pSession->lastdata = (void*)pPacket;
+		++pSession->packet_num;
 		return HTTP_APPEND_SUCCESS;
 	}
 	// TODO: if HTTP_CONTENT_FILE, drop packet. 
@@ -565,6 +566,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		case HTTP_CONTENT_FILE_EXCEL:
 		case HTTP_CONTENT_FILE_RTF:
 		case HTTP_CONTENT_FILE_OTHER:
+		case HTTP_CONTENT_STREAM:
 			free((void*)pPacket);
 			return HTTP_APPEND_SUCCESS;
 		case HTTP_CONTENT_NONE:
@@ -574,6 +576,9 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 			*(const char**)pSession->lastdata = pPacket;
 			pSession->lastdata = (void*)pPacket;
 			++pSession->packet_num;
+			if (pSession->packet_num>10) {
+				pSession->content_type=HTTP_CONTENT_STREAM;
+			}
 			return HTTP_APPEND_SUCCESS;
 	}
 
