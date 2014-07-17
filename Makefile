@@ -1,6 +1,6 @@
 TARGET = eru_agent
 OUTDIR = build/
-CC = /home/daniel/gcc447/bin/gcc
+CC = /home/daniel/gcc447/bin/gcc -m64
 
 ifdef RELEASE
 	CFLAGS = -Wall -O2 -fomit-frame-pointer -march=prescott
@@ -25,7 +25,7 @@ LIBRARYS = -lpthread -lz -lpcap
 
 all: $(OUTDIR) $(TARGET)
 	#@cp -af config ~/agent/
-	@cp -f $(TARGET) ~/agent
+	@cp -f $(TARGET) ../agent
 	@echo 'End compiling. $(shell date +"%F %T")'
 
 $(OUTDIR):

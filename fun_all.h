@@ -19,11 +19,6 @@ struct hosts_t
 	in_port_t port;
 };
 
-struct line_t {
-	const char* content;
-	int len;
-};
-
 // it should be http_session
 struct http_session
 {
@@ -33,15 +28,16 @@ struct http_session
 	uint32_t flag;		// HTTP_SESSION_???
 	uint32_t seq;		// client
 	uint32_t ack;		// client
-	uint32_t transfer_flag;
-	uint32_t content_encoding;	   // 1:gzip; 0:no encoding
-	uint32_t content_type;			   // 0:no match; 1:html; 2:file
 	uint32_t contentlen;	// len of last packet
+	uint32_t content_type;			   // 0:no match; 1:html; 2:file
+	uint32_t transfer_flag;
+	uint32_t content_encoding;
 	uint32_t http_content_length;
+	uint32_t http_content_remain;
 	struct timeval create;	// first
 	struct timeval update;	// the lasttime update. TODO: time_t
-	struct line_t query_url;
-	struct line_t http;
+	char* query_url;
+	char* http;
 	char* response_head;
 	uint32_t response_head_len;	
 	void *data;
@@ -67,10 +63,12 @@ void* LoadHost(char* hostsbuff);
 #define IPHDR(packet) (struct iphdr*)((void*)(packet) + ((((struct ether_header*)(packet))->ether_type == htons(ETHERTYPE_IP)) ? ETHER_HDR_LEN : (ETHER_HDR_LEN+4)))
 #define TCPHDR(ippacket) (struct tcphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
 #define UDPHDR(ippacket) (struct udphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
-#define FLOW_SET(tcphead, x) (tcphead->check = (x))
-#define FLOW_GET(tcphead) (tcphead->check)
-#define FRAME_NUM_SET(packet) (*(uint32_t*)packet = ++packet_num)
-#define FRAME_NUM_GET(packet) (*(uint32_t*)packet)
+#define FLOW_SET(tcphead, x) ((tcphead)->check = (x))
+#define FLOW_GET(tcphead) ((tcphead)->check)
+#define CONTENT_LEN_GET(tcphead) ((tcphead)->window)
+#define CONTENT_LEN_SET(tcphead, x) do { (tcphead)->window = x; } while(0)
+#define FRAME_NUM_SET(packet) (*(uint32_t*)(packet) = ++packet_num)
+#define FRAME_NUM_GET(packet) (*(uint32_t*)(packet))
 
 #endif
 

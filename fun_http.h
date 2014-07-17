@@ -7,6 +7,7 @@
 
 enum HTTP_SESSION_FLAGS { 
 	HTTP_SESSION_IDL, 
+	HTTP_SESSION_NEW,
 	HTTP_SESSION_REQUESTING,
 	HTTP_SESSION_REQUEST, 
 	HTTP_SESSION_RESPONSEING,
@@ -90,9 +91,8 @@ int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const st
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
 uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData, int gz);
-int AppendServerToClient(int nIndex, const char* pPacket);
-int AppendClientToServer(int nIndex, const char* pPacket);
-int AppendResponse(const char* packet);
+int AppendServerToClient(struct http_session* session, const char* pPacket);
+int AppendClientToServer(struct http_session* session, const char* pPacket);
 
 #endif
 

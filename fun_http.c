@@ -66,6 +66,8 @@ extern int _block_func_on;
 //           |------------|------------|------------------> TIMEOUT
 volatile int _http_living = 1;
 time_t _http_active = 0;
+
+char* _IGNORE_EXT[] = { ".gif", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
 static const unsigned _http_image = 0x50545448;
 static const unsigned _get_image = 0x20544547;
 static const unsigned _post_image = 0x54534F50;
@@ -123,31 +125,26 @@ const void* _get_content_from_tcphdr(const struct tcphdr* hdr)
 	return content;
 }
 ///////////////////////////////////////////////////////////////
+void CleanPacketList(void* packet)
+{
+	while (packet!=NULL) {
+		void* tmp = packet;
+		packet = *(void**)packet;
+		free(tmp);
+	}
+}
 struct http_session* CleanHttpSession(struct http_session* pSession)
 {
-	LOGDEBUG("Session[%d] start clean!", pSession->index);
+	assert(pSession->flag!=HTTP_SESSION_IDL);
 	
-	//if (pSession->flag != HTTP_SESSION_IDL) 
-	{
-		unsigned index = pSession->index;
-		void* packet = pSession->data;
-		while (packet!=NULL)
-		{
-			void* tmp = packet;
-			packet = *(void**)packet;
-			free(tmp);
-		}
+	unsigned index = pSession->index;
+	CleanPacketList(pSession->data);
 
-		LOGTRACE("Session[%d] clean packet data successfully!", pSession->index);
-		
-		bzero(pSession, sizeof(*pSession));
-		pSession->index = index;
-		pSession->flag = HTTP_SESSION_IDL;
-		
-		push_queue(_idl_session, pSession);
-	}
-
-	LOGDEBUG("Session[%d] end clean!", pSession->index);
+	bzero(pSession, sizeof(*pSession));
+	pSession->index = index;
+	pSession->flag = HTTP_SESSION_IDL;
+	
+	push_queue(_idl_session, pSession);
 	return pSession;
 }
 
@@ -164,14 +161,14 @@ void *_process_timeout(void* p)
 			struct http_session* session = &_http_session[index];
 			if ( session->flag>HTTP_SESSION_IDL && session->flag<HTTP_SESSION_FINISH ) {
 				if (_http_active-session->update.tv_sec > g_nHttpTimeout) {
-					LOGWARN("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
+					LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, session->update.tv_sec, g_nHttpTimeout, session->flag);
 					session->flag = HTTP_SESSION_TIMEOUT;
 					push_queue(_whole_content, session);
 				}
 			} else if (session->flag == HTTP_SESSION_BROKEN) {
 				if (_http_active-session->update.tv_sec > broken_time) {
-					LOGWARN("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
+					LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, session->update.tv_sec, g_nHttpTimeout, session->flag);
 					push_queue(_whole_content, session);
 				}
@@ -180,32 +177,23 @@ void *_process_timeout(void* p)
 	}
 	return NULL;
 }
+// only the packet from client can create new session.
 void _init_new_http_session( struct http_session* pIDL, const char* packet)
 {
 	struct timeval *tv = (struct timeval*)packet;
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead=TCPHDR(iphead);
-	unsigned contentlen = tcphead->window;
-	char *content = (void*)tcphead + tcphead->doff*4;
+	unsigned contentlen = CONTENT_LEN_GET(tcphead);
+	assert(contentlen>0);
+	assert(FLOW_GET(tcphead) == C2S);
 
-	pIDL->flag = HTTP_SESSION_REQUESTING;
-	if (*(unsigned*)content==_get_image || *(unsigned*)content==_post_image || FLOW_GET(tcphead)==C2S) {
-	//if (memmem(packet, 5, "GET ", 4) == packet|| memmem(packet, 6, "POST ", 5) == packet || FLOW_GET(tcphead)==C2S) {
-		pIDL->client.ip.s_addr = iphead->saddr;
-		pIDL->server.ip.s_addr = iphead->daddr;
-		pIDL->client.port = tcphead->source;
-		pIDL->server.port = tcphead->dest;
-	} else if (*(uint32_t*)content==_http_image || FLOW_GET(tcphead)==S2C) {
-		pIDL->client.ip.s_addr = iphead->daddr;
-		pIDL->server.ip.s_addr = iphead->saddr;
-		pIDL->client.port = tcphead->dest;
-		pIDL->server.port = tcphead->source;
-	} else {
-		LOGFATAL("Cannt get here! %u.", FRAME_NUM_GET(packet));
-	}
+	pIDL->flag = HTTP_SESSION_NEW;
+	pIDL->client.ip.s_addr = iphead->saddr;
+	pIDL->server.ip.s_addr = iphead->daddr;
+	pIDL->client.port = tcphead->source;
+	pIDL->server.port = tcphead->dest;
 	pIDL->create = *tv;
 	pIDL->update = *tv;
-	ASSERT(FLOW_GET(tcphead) == C2S);
 	pIDL->seq = tcphead->seq;
 	pIDL->ack = tcphead->ack_seq;
 	pIDL->data = (void*)packet;
@@ -213,100 +201,76 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	pIDL->packet_num = 1;
 	pIDL->contentlen = contentlen;
 	pIDL->http_content_length = 0;
-	pIDL->transfer_flag = HTTP_TRANSFER_NONE;
-	pIDL->content_encoding = HTTP_CONTENT_ENCODING_NONE;
+	pIDL->http_content_remain = 0;
 	pIDL->content_type = HTTP_CONTENT_NONE;
 	*(const char**)packet = NULL;
-	if ((*(unsigned*)content==_get_image)
-			&& content[contentlen-4]=='\r' && content[contentlen-3]=='\n'
-			&& content[contentlen-2]=='\r' && content[contentlen-1]=='\n') {
-		pIDL->flag = HTTP_SESSION_REQUEST;
-	} else if ( *(unsigned*)content==_post_image ) {	// TODO: maybe bug. maybe not complete
-		pIDL->flag = HTTP_SESSION_REQUEST;
-	} else {
-		pIDL->flag = HTTP_SESSION_REQUEST;
-	}
-
 	// TODO:
 	pIDL->prev = NULL;
 	pIDL->next = NULL;
 	LOGTRACE("Session[%d] NewHttpSession.%u.", pIDL->index, FRAME_NUM_GET(packet));
 }
-char* _IGNORE_EXT[] = { ".gif", ".js?", ".css" , ".jpg", ".ico", ".bmp", ".png" };
-int NewHttpSession(const char* packet)
+// only client tcphead
+struct http_session* FindSession(uint32_t ip, uint16_t port)
 {
-	struct timeval tv = *(struct timeval*)packet;
-	struct iphdr *iphead = IPHDR(packet);
-	struct tcphdr *tcphead=TCPHDR(iphead);
-	unsigned contentlen = tcphead->window;
-	char *content = (void*)tcphead + tcphead->doff*4;
-	const char* cmdline = content;
-	assert(contentlen>0 && contentlen<RECV_BUFFER_LEN);
-	int special = 0;
-
-	// reuse and resend
 	for (int n=0; n<g_nMaxHttpSessionCount; ++n){
 		struct http_session* p = &_http_session[n];
 		if (p->flag == HTTP_SESSION_IDL) continue;
 		if (p->flag >= HTTP_SESSION_FINISH) continue;
-		if (p->client.ip.s_addr == iphead->saddr && p->client.port==tcphead->source){
-			if (p->seq < tcphead->seq) {
-				if (p->seq+p->contentlen == tcphead->seq) {
-					p->flag = HTTP_SESSION_FINISH;
-					push_queue(_whole_content, p);
-				} else if (p->seq+p->contentlen < tcphead->seq) {
-					p->flag = HTTP_SESSION_BROKEN;
-				} else {
-					LOGFATAL0("cannt get here");
-					return -3;
-				}
-				break;
-			} else if (p->seq == tcphead->seq) {
-				uint32_t* tContent = (uint32_t*)_get_content_from_packet(p->lastdata);
-				if (*tContent==*(uint32_t*)content) return -3;	// resend
-			} else {
-				void* prev = (void*)_insert_into_session(p, packet); 
-				if (prev == packet) return -3;
-				if (prev == NULL) { 
-					++p->packet_num;
-					return p->index;
-				}
-				*(void**)prev = NULL;
-				p->lastdata = prev;
-				p->flag = HTTP_SESSION_FINISH;
-				push_queue(_whole_content, p);
-				special = 1;
-				break;
-			}
+		if (p->client.ip.s_addr == ip && p->client.port==port){
+			return p;
 		}
 	}
+	return NULL;
+}
+int NewHttpSessionWithQuery(const char* packet)
+{
+	struct timeval tv = *(struct timeval*)packet;
+	struct iphdr *iphead = IPHDR(packet);
+	struct tcphdr *tcphead=TCPHDR(iphead);
+	unsigned contentlen = CONTENT_LEN_GET(tcphead);
+	char *content = (void*)tcphead + tcphead->doff*4;
+	assert(contentlen>0 && contentlen<RECV_BUFFER_LEN);
+	assert(FLOW_GET(tcphead) == C2S);
+	int special = 0;
 
-	char* enter = strchr(content, '\r');
-	if (enter == NULL) {
-		enter = strchr(content, '\n');
-		if (enter == NULL) return -1;	// TODO: wrong packet.
+	// reuse and resend
+	struct http_session* p = FindSession(iphead->saddr, tcphead->source);
+	if (p != NULL) {	// focus order
+		if (p->seq+p->contentlen == tcphead->seq) {
+			p->flag = HTTP_SESSION_FINISH;
+			push_queue(_whole_content, p);
+		} else if (p->seq+p->contentlen < tcphead->seq) {
+			p->flag = HTTP_SESSION_BROKEN;
+		} else if (p->seq > tcphead->seq) { // fix order or resend
+			void* prev = (void*)_insert_into_session(p, packet); 
+			if (prev == packet) return -3;	// resend
+			if (prev == NULL) {		// head
+				++p->packet_num;
+				return p->index;
+			}
+			// GET .... GET ...
+			*(void**)prev = NULL;
+			p->lastdata = prev;
+			p->flag = HTTP_SESSION_FINISH;
+			push_queue(_whole_content, p);
+			special = 1;
+		}
 	}
-	
-	char tmp = *enter;
-	int cmdlinen = enter-content;
-	*enter = '\0';
-	{
-		char sip[16], dip[16];
-		LOGINFO("New session.%u.[%s:%u->%s:%u]: %s", FRAME_NUM_GET(packet),
-				inet_ntop(AF_INET, &iphead->saddr, sip, 16), ntohs(tcphead->source),
-				inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest),
-				cmdline);
-	}
-	
 	/*for (int n=0; n<sizeof(_IGNORE_EXT)/sizeof(char*); ++n) {
 		if (strstr(cmdline, _IGNORE_EXT[n]) != NULL) return -3;	// TODO: ignore
 	}*/
-	*enter = tmp;
-
+	char sip[16], dip[16];
+	LOGINFO("New session.%u.[%s:%u->%s:%u]", FRAME_NUM_GET(packet),
+			inet_ntop(AF_INET, &iphead->saddr, sip, 16), ntohs(tcphead->source),
+			inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest));
+	
 	struct http_session* pIDL = NULL;
 	do { pIDL = (struct http_session*)pop_queue_timedwait(_idl_session); } while (DEBUG && pIDL==NULL);	// For test
-	if (pIDL == NULL) return -2;
-	void *pSpecial = *(void**)packet;
+	if (pIDL == NULL) {
+		CleanPacketList((void*)packet);
+		return -4;
+	}
+	void *pSpecial = *(void**)packet;	// next packet in special
 	if (special) { *(struct timeval*)packet = tv; };
 	_init_new_http_session(pIDL, packet);
 	if (special) {
@@ -317,15 +281,8 @@ int NewHttpSession(const char* packet)
 		}
 	}
 	// only for query
-	pIDL->query_url.content = cmdline;
-	pIDL->query_url.len = cmdlinen;
-	if (FLOW_GET(tcphead)!=C2S) {
-		char sip[32],dip[32];
-		inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
-		inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
-		LOGERROR("client[%s:%u.%d] maybe server. => [%s:%u]", sip, ntohs(tcphead->source),
-				FLOW_GET(tcphead), dip, ntohs(tcphead->dest));
-	}
+	pIDL->query_url = content;
+	pIDL->flag = HTTP_SESSION_REQUESTING;
 	return pIDL->index;
 }
 
@@ -410,34 +367,37 @@ const void* _insert_into_session(struct http_session* session, const char* packe
 	return packet;
 }
 
-int AppendServerToClient(int nIndex, const char* pPacket)
+int AppendServerToClient(struct http_session* pSession, const char* pPacket)
 { 
-	ASSERT(nIndex >= 0);
-	
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
-	unsigned contentlen = tcphead->window;
+	unsigned contentlen = CONTENT_LEN_GET(tcphead);
 	char *content = (void*)tcphead + tcphead->doff*4;
-	struct http_session *pSession = &_http_session[nIndex];
+	assert(FLOW_GET(tcphead) == S2C);
 
 	if (contentlen>0 && tcphead->seq<pSession->ack) {
 		if (pSession->content_type >= HTTP_CONTENT_FILE) {
 			// Nothing todo. it will be drop
-		} else if (pPacket != _insert_into_session(pSession, pPacket)) {
-			return HTTP_APPEND_SUCCESS;
+			if (pSession->content_type==HTTP_CONTENT_STREAM) {
+				free((void*)pPacket);
+				++pSession->packet_num;
+				return HTTP_APPEND_SUCCESS;
+			}
 		} else {
-			return HTTP_APPEND_FAIL;
+			const void* p = _insert_into_session(pSession, pPacket);
+		   	if (p==NULL){ LOGFATAL0("Cannt get here"); }
+			if (p==pPacket) return HTTP_APPEND_FAIL;	// resend
+			return HTTP_APPEND_SUCCESS;
 		}
 	} else if (contentlen==0 && tcphead->seq<pSession->ack) {
-		// nothing
+		// nothing. wait for free
 	} else {
 		pSession->seq = tcphead->ack_seq;
 		pSession->ack = tcphead->seq;
 		pSession->contentlen = contentlen;
 		pSession->update = *tv;
 	}
-	contentlen = tcphead->window;
 
 	// tcp
 	if (tcphead->rst) {
@@ -463,29 +423,17 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		return HTTP_APPEND_SUCCESS;
 	}
 	// http
-	if ((*(unsigned*)content == _http_image)) {
+	if (pSession->flag<HTTP_SESSION_RESPONSEING && (*(unsigned*)content==_http_image)) {
+		pSession->http = content;
 		pSession->flag = HTTP_SESSION_RESPONSEING;
 		if (pSession->response_head==NULL) {
 			pSession->response_head = (char*) malloc(RECV_BUFFER_LEN);
-			if (pSession->response_head == NULL) {
-				LOGERROR0("less memory.");
-			}
-		}
-		char* p = memchr(content, '\r', contentlen);
-		if (p==NULL) { 
-			pSession->http.content = content;
-			pSession->http.len = contentlen;
-		} else {
-			pSession->http.content = content;
-			pSession->http.len = p-content;
+			if (pSession->response_head == NULL) { LOGERROR0("less memory."); }
 		}
 	}
 	if (pSession->flag == HTTP_SESSION_RESPONSEING) {
-		char* end = NULL;
-		end = (char*)memmem(content, contentlen, "\r\n\r\n", 4);
-		if (end != NULL) { 
-			pSession->flag = HTTP_SESSION_REPONSE; 
-		}
+		char* end = (char*)memmem(content, contentlen, "\r\n\r\n", 4);
+		if (end != NULL) { pSession->flag = HTTP_SESSION_REPONSE; }
 		if (pSession->response_head!=NULL) {	// no memory
 			uint32_t clen = contentlen;
 			if (end != NULL) { clen = end-content; }
@@ -499,6 +447,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		}
 	}
 	if (pSession->flag==HTTP_SESSION_REPONSE && pSession->response_head != NULL) {
+		pSession->flag = HTTP_SESSION_REPONSE_ENTITY;
 		strlwr(pSession->response_head);
 		// Process Content-Length and Transfer-Encoding
 		char* content_length = (char*)memmem(pSession->response_head, pSession->response_head_len,
@@ -543,7 +492,6 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 			else 
 				pSession->content_encoding = HTTP_CONTENT_ENCODING_COMPRESS;
 		}
-		pSession->flag = HTTP_SESSION_REPONSE_ENTITY;
 		*(const char**)pPacket = NULL;
 		*(const char**)pSession->lastdata = pPacket;
 		pSession->lastdata = (void*)pPacket;
@@ -570,6 +518,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 		case HTTP_CONTENT_FILE_OTHER:
 		case HTTP_CONTENT_STREAM:
 			free((void*)pPacket);
+			++pSession->packet_num;
 			return HTTP_APPEND_SUCCESS;
 		case HTTP_CONTENT_NONE:
 		case HTTP_CONTENT_HTML:
@@ -578,7 +527,7 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 			*(const char**)pSession->lastdata = pPacket;
 			pSession->lastdata = (void*)pPacket;
 			++pSession->packet_num;
-			if (pSession->packet_num>10) {
+			if (pSession->packet_num>10&&pSession->flag==HTTP_SESSION_NEW) {
 				pSession->content_type=HTTP_CONTENT_STREAM;
 			}
 			return HTTP_APPEND_SUCCESS;
@@ -587,21 +536,20 @@ int AppendServerToClient(int nIndex, const char* pPacket)
 	return HTTP_APPEND_SUCCESS;
 }
 
-int AppendClientToServer(int nIndex, const char* pPacket)
+int AppendClientToServer(struct http_session* pSession, const char* pPacket)
 {
-	ASSERT(nIndex >= 0);
-	
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
 	int contentlen = tcphead->window;
 	const char *content = (void*)tcphead + tcphead->doff*4;
-	struct http_session *pSession = &_http_session[nIndex];
+	assert(FLOW_GET(tcphead)==C2S);
 
 	if (contentlen>0 && tcphead->seq<pSession->seq) {
-		if (pPacket != _insert_into_session(pSession, pPacket)) {
+		const void * p = _insert_into_session(pSession, pPacket);
+		if (pPacket != p) {
 			return HTTP_APPEND_SUCCESS;
-		} else {
+		} else { // resend
 			return HTTP_APPEND_FAIL;
 		}
 	} else if (contentlen==0 && tcphead->seq<pSession->seq) {
@@ -612,7 +560,6 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 		pSession->contentlen = contentlen;
 		pSession->update = *tv;
 	}
-	contentlen = tcphead->window;
 
 	// tcp
 	if (tcphead->rst) {
@@ -638,7 +585,7 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 		free((void*)pPacket);
 		return HTTP_APPEND_SUCCESS;
 	}
-	// HTTP
+	/* HTTP
 	if (pSession->flag != HTTP_SESSION_REQUESTING) {
 		if (pSession->flag != HTTP_SESSION_REQUEST) {
 			char sip[32], dip[32];
@@ -651,8 +598,8 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 			free((void*)pPacket);
 			return HTTP_APPEND_REUSE;
 		}
-	}
-	if (memmem(content, contentlen, "\r\n\r\n", 4)!=NULL) {
+	}*/
+	if (pSession->flag<HTTP_SESSION_REQUEST && memmem(content, contentlen, "\r\n\r\n", 4)!=NULL) {
 		pSession->flag = HTTP_SESSION_REQUEST;
 	}
 
@@ -666,70 +613,6 @@ int AppendClientToServer(int nIndex, const char* pPacket)
 	++pSession->packet_num;
 
 	return HTTP_APPEND_SUCCESS;
-}
-
-int AppendResponse(const char* packet)
-{
-	struct timeval *tv = (struct timeval*)packet;
-	struct iphdr *iphead = IPHDR(packet);
-	struct tcphdr *tcphead = TCPHDR(iphead);
-	struct http_session *pREQ = &_http_session[0];
-	unsigned contentlen = tcphead->window;
-	char *content = (void*)tcphead + tcphead->doff*4;
-	if (contentlen==0 && !tcphead->fin && !tcphead->rst) {
-		free((void*)packet);
-		return HTTP_APPEND_SUCCESS;
-	}
-	if (*(uint32_t*)content==_http_image) INC_HTTP_IMAGE;
-	int flow = FLOW_GET(tcphead);
-
-	char sip[32],dip[32];
-	int index = 0;
-	int nRs = 0;
-	for (; index < g_nMaxHttpSessionCount; ++index) // TODO: MAX_HTTP_SESSION
-	{
-		pREQ = &_http_session[index];
-		if (pREQ->flag == HTTP_SESSION_IDL || pREQ->flag >= HTTP_SESSION_FINISH) continue;
-
-		if (pREQ->client.ip.s_addr == iphead->daddr && pREQ->client.port == tcphead->dest 
-			&& pREQ->server.ip.s_addr == iphead->saddr && pREQ->server.port == tcphead->source) {
-			// server -> client
-			if (FLOW_GET(tcphead)!=S2C) {
-				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
-				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
-				LOGERROR("server[%s:%u.%u.%u.%u] maybe client. => [%s:%u]", sip, 
-						ntohs(tcphead->source), tcphead->seq, tcphead->ack_seq,
-					FLOW_GET(tcphead), dip, ntohs(tcphead->dest));
-			}
-			nRs = AppendServerToClient(index, packet);
-			break;
-		} else if (pREQ->client.ip.s_addr == iphead->saddr && pREQ->client.port == tcphead->source 
-				 && pREQ->server.ip.s_addr == iphead->daddr && pREQ->server.port == tcphead->dest) { 
-			// client -> server
-			if (FLOW_GET(tcphead)!=C2S) {
-				inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip));
-				inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip));
-				LOGERROR("client[%s:%u.%d.%u.%u] maybe server. => [%s:%u]", sip, 
-						ntohs(tcphead->source), tcphead->seq, tcphead->ack_seq,
-					FLOW_GET(tcphead), dip, ntohs(tcphead->dest));
-			}
-			nRs = AppendClientToServer(index, packet);
-			break;
-		} 
-	}
-	if (nRs == HTTP_APPEND_FAIL || index == g_nMaxHttpSessionCount) {
-		// TODO: another new session
-		char sip[20], dip[20], stip[20], dtip[20];
-		LOGINFO("Cannt find session. drop. .%u.%s:%d.%u.%u => %s:%d\n%s", FRAME_NUM_GET(packet),
-				inet_ntop(AF_INET, &iphead->saddr, stip, 20),  ntohs(tcphead->source),
-				tcphead->seq, tcphead->ack_seq,
-				inet_ntop(AF_INET, &iphead->daddr, dtip, 20),  ntohs(tcphead->dest),
-				content);
-		
-		index = HTTP_APPEND_FAIL;
-	}
-
-	return index;
 }
 
 void *HTTP_Thread(void* param)
@@ -760,7 +643,7 @@ void *HTTP_Thread(void* param)
 		if ((*cmd == _get_image || *cmd == _post_image) && contentlen>0) {	// TODO: bug
 			INC_HTTP_GET_POST;
 			// TODO: need to process RST and FIN
-			int nRes = NewHttpSession(packet);
+			int nRes = NewHttpSessionWithQuery(packet);
 			if (nRes >= 0) {
 				INC_NEW_HTTP_SESSION;
 			} else if (nRes == -1) {
@@ -785,12 +668,26 @@ void *HTTP_Thread(void* param)
 						tcphead->seq, tcphead->ack_seq, tcphead->window,
 						inet_ntop(AF_INET, &iphead->daddr, dip, 16), ntohs(tcphead->dest), content);
 				free((void*)packet);
+			} else { // -4
 			}
 			continue;
 		}
 
-		int nIndex = AppendResponse(packet);
-		if (nIndex == HTTP_APPEND_FAIL) {
+		if (contentlen==0 && !tcphead->fin && !tcphead->rst) {
+			free((void*)packet);
+			continue;
+		}
+		int nRs = HTTP_APPEND_FAIL;
+		struct http_session* session = FindSession(iphead->daddr, tcphead->dest);
+		if (session!=NULL) {
+			nRs = AppendServerToClient(session, packet);
+		} else {
+			session = FindSession(iphead->saddr, tcphead->source);
+			if (session!=NULL) {
+				nRs = AppendClientToServer(session, packet);
+			}
+		}
+		if (nRs == HTTP_APPEND_FAIL) {
 			if (FLOW_GET(tcphead)==C2S && contentlen>0) { // maybe a bug.
 				struct http_session* pIDL = NULL;
 LOOP_DEBUG:
