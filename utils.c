@@ -187,11 +187,11 @@ int logmsg(int level, const char* fmt, ... )
 	va_start(ap, fmt);
 
 	fprintf(_logfd, "%s %s: ", timebuf, _LOG_LEVEL[level]);
-	if (level>2) fprintf(stdout, "%s %s: ", timebuf, _LOG_LEVEL[level]);
+	// if (level>2) fprintf(stdout, "%s %s: ", timebuf, _LOG_LEVEL[level]);
 	int nRet = vfprintf(_logfd, fmt, ap);
-	if (level>2) vfprintf(stdout, fmt, ap);
+	// if (level>2) vfprintf(stdout, fmt, ap);
 	fprintf(_logfd, "\n");
-	if (level>2) fprintf(stdout, "\n");
+	// if (level>2) fprintf(stdout, "\n");
 
 	va_end(ap);
 

@@ -41,7 +41,7 @@ void PrintStati()
 	time_t now = time(NULL);
 	char stime[64];
 	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
-	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
+	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
 			packets_pop, get_post_count, new_http_session, http_image, sent_count, 
 			whole_html_session, drop_packet_count);
 }

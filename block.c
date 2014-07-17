@@ -355,7 +355,7 @@ int BlockHttpRequest(const char* pPacket, int nBlockItemIndex)
 	sprintf(szBlockHttpContent, 
 				"HTTP/1.1 200 OK\r\n"
 				"Content-Type: text/html; charset=utf-8\r\n"
-				"Content-Length: %d\r\n"
+				"Content-Length: %u\r\n"
 				"Connection: close\r\n\r\n%s",
 				strlen(szBlockHtml), szBlockHtml);
 

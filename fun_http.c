@@ -55,7 +55,7 @@ static struct http_session* _http_session = NULL;	// a session = query + reponse
 static struct queue_t *_idl_session = NULL;			// all idl session
 static struct queue_t *_whole_content = NULL;		// http_session.flag = HTTP_SESSION_FINISH
 pthread_rwlock_t _working_session_lock = {0};
-static struct queue_t *_working_session = NULL;
+static struct http_session *_working_session = NULL;
 
 extern volatile int g_nFlagGetData;
 extern volatile int g_nFlagSendData;
@@ -1008,7 +1008,7 @@ int GetHttpData(char **data)
 
 	// *(unsigned*)HTTP == _get_image, _post_image 
 	if (HTTP == NULL) {
-		LOGERROR("Not http!!!!! cannt get here!!!. \n%s", HTTP_PRE);
+		LOGINFO("Not http!!!!! cannt get here!!!. \n%s", HTTP_PRE);
 		goto ERROR_EXIT;
 	}
 

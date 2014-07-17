@@ -1,9 +1,10 @@
 TARGET = eru_agent
 OUTDIR = build/
-CC = /home/daniel/gcc447/bin/gcc -m64
+#CC = /home/daniel/gcc447/bin/gcc -m32
+CC = clang
 
 ifdef RELEASE
-	CFLAGS = -Wall -O2 -fomit-frame-pointer -march=prescott
+	CFLAGS = -Wall -O3 -fomit-frame-pointer -march=prescott
 else
 	CFLAGS = -ggdb -O0 -pg
 endif
