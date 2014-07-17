@@ -173,7 +173,6 @@ void *_process_timeout(void* p)
 				if (_http_active-session->update.tv_sec > broken_time) {
 					LOGWARN("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, session->update.tv_sec, g_nHttpTimeout, session->flag);
-					session->flag = HTTP_SESSION_TIMEOUT;
 					push_queue(_whole_content, session);
 				}
 			}
@@ -267,8 +266,11 @@ int NewHttpSession(const char* packet)
 				if (*tContent==*(uint32_t*)content) return -3;	// resend
 			} else {
 				void* prev = (void*)_insert_into_session(p, packet); 
-				assert(prev!=packet);
-				if (prev == NULL) return p->index;
+				if (prev == packet) return -3;
+				if (prev == NULL) { 
+					++p->packet_num;
+					return p->index;
+				}
 				*(void**)prev = NULL;
 				p->lastdata = prev;
 				p->flag = HTTP_SESSION_FINISH;
