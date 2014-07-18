@@ -29,7 +29,7 @@ struct http_session
 	uint32_t seq;		// client
 	uint32_t ack;		// client
 	uint32_t query_image;
-	uint32_t contentlen;	// len of last packet
+	//uint32_t contentlen;	// len of last packet
 	uint32_t content_type;			   // 0:no match; 1:html; 2:file
 	uint32_t transfer_flag;
 	uint32_t content_encoding;

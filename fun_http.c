@@ -175,14 +175,14 @@ void _append_packet_to_session(struct http_session* session, void* packet)
 	session->update = *(struct timeval*)packet;
 	if (flow==S2C) {
 		session->seq = tcp->ack_seq;
-		session->ack = tcp->seq;
+		session->ack = tcp->seq+CONTENT_LEN_GET(tcp);
 	} else if (flow==C2S) {
-		session->seq = tcp->seq;
+		session->seq = tcp->seq+CONTENT_LEN_GET(tcp);
 		session->ack = tcp->ack_seq;
 	} else {
 		assert(0);
 	}
-	session->contentlen = CONTENT_LEN_GET(tcp);
+	//session->contentlen = CONTENT_LEN_GET(tcp);
 	*(void**)packet = NULL;
 	*(void**)session->lastdata = packet;
 	session->lastdata = packet;
@@ -215,7 +215,7 @@ struct http_session* CleanHttpSession(struct http_session* pSession)
 void *_process_timeout(void* p)
 {
 	int broken_time = 1;
-	if (DEBUG) broken_time = 100;
+	if (DEBUG) broken_time = 2000;
 
 	while (_http_living) {
 		sleep(1);
@@ -258,12 +258,12 @@ void _init_new_http_session( struct http_session* pIDL, const char* packet)
 	pIDL->server.port = tcphead->dest;
 	pIDL->create = *tv;
 	pIDL->update = *tv;
-	pIDL->seq = tcphead->seq;
+	pIDL->seq = tcphead->seq+contentlen;
 	pIDL->ack = tcphead->ack_seq;
 	pIDL->data = (void*)packet;
 	pIDL->lastdata = (void*)packet;
 	pIDL->packet_num = 1;
-	pIDL->contentlen = contentlen;
+	//pIDL->contentlen = contentlen;
 	pIDL->http_content_length = 0;
 	pIDL->http_content_remain = 0;
 	pIDL->content_type = HTTP_CONTENT_NONE;
@@ -288,6 +288,7 @@ struct http_session* FindSession(uint32_t ip, uint16_t port)
 }
 int NewHttpSessionWithQuery(const char* packet)
 {
+	assert(0);
 	struct timeval tv = *(struct timeval*)packet;
 	struct iphdr *iphead = IPHDR(packet);
 	struct tcphdr *tcphead=TCPHDR(iphead);
@@ -300,10 +301,10 @@ int NewHttpSessionWithQuery(const char* packet)
 	// reuse and resend
 	struct http_session* p = FindSession(iphead->saddr, tcphead->source);
 	if (p != NULL) {	// focus order
-		if (p->seq+p->contentlen == tcphead->seq) {
+		if (p->seq == tcphead->seq) {
 			p->flag = HTTP_SESSION_FINISH;
 			push_queue(_whole_content, p);
-		} else if (p->seq+p->contentlen < tcphead->seq) {
+		} else if (p->seq < tcphead->seq) {
 			p->flag = HTTP_SESSION_BROKEN;
 		} else if (p->seq > tcphead->seq) { // fix order or resend
 			void* prev = (void*)_insert_into_session(p, packet); 
@@ -436,6 +437,7 @@ const void* _insert_into_session(struct http_session* session, const char* packe
 
 int AppendServerToClient(struct http_session* pSession, const char* pPacket)
 { 
+	assert(0);
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
@@ -460,9 +462,9 @@ int AppendServerToClient(struct http_session* pSession, const char* pPacket)
 	} else if (contentlen==0 && tcphead->seq<pSession->ack) {
 		// nothing. wait for free
 	} else {
-		pSession->seq = tcphead->ack_seq;
+		pSession->seq = tcphead->ack_seq+contentlen;
 		pSession->ack = tcphead->seq;
-		pSession->contentlen = contentlen;
+		// pSession->contentlen = contentlen;
 		pSession->update = *tv;
 	}
 
@@ -605,6 +607,7 @@ int AppendServerToClient(struct http_session* pSession, const char* pPacket)
 
 int AppendClientToServer(struct http_session* pSession, const char* pPacket)
 {
+	assert(0);
 	struct timeval *tv = (struct timeval*)pPacket;
 	struct iphdr *iphead = IPHDR(pPacket);
 	struct tcphdr *tcphead = TCPHDR(iphead);
@@ -622,9 +625,9 @@ int AppendClientToServer(struct http_session* pSession, const char* pPacket)
 	} else if (contentlen==0 && tcphead->seq<pSession->seq) {
 		// nothing
 	} else {
-		pSession->seq = tcphead->seq;
+		pSession->seq = tcphead->seq+contentlen;
 		pSession->ack = tcphead->ack_seq;
-		pSession->contentlen = contentlen;
+		// pSession->contentlen = contentlen;
 		pSession->update = *tv;
 	}
 
@@ -670,9 +673,9 @@ int AppendClientToServer(struct http_session* pSession, const char* pPacket)
 		pSession->flag = HTTP_SESSION_REQUEST;
 	}
 
-	pSession->seq = tcphead->seq;
+	pSession->seq = tcphead->seq+contentlen;
 	pSession->ack = tcphead->ack_seq;
-	pSession->contentlen = contentlen;
+	// pSession->contentlen = contentlen;
 	pSession->update = *tv;
 	*(const char**)pPacket = NULL;
 	*(const char**)pSession->lastdata = pPacket;
@@ -722,7 +725,7 @@ void *HTTP_Thread(void* param)
 					free((void*)packet);
 					continue;
 				} else {	// maybe insert
-					if (tcphead->seq < session->seq+session->contentlen) {
+					if (tcphead->seq < session->seq) {
 						if (_insert_into_session(session, packet)==packet){ // resend
 							free((void*)packet);
 							continue;
@@ -778,7 +781,7 @@ void *HTTP_Thread(void* param)
 					free(packet);
 					continue;
 				} else if (tcphead->fin) { // assume no out-of-order
-					assert(tcphead->seq == session->ack+session->contentlen);
+					assert(tcphead->seq == session->ack);
 					if (contentlen>0) {
 						_append_packet_to_session(session, packet);
 					} else {
@@ -789,7 +792,7 @@ void *HTTP_Thread(void* param)
 					assert(contentlen>0);
 					if (_check_http_or_query(content)==3) { session->http = content; }	// HTTP/1.1
 
-					if (tcphead->seq >= session->ack+session->contentlen) {
+					if (tcphead->seq >= session->ack) {
 						_append_packet_to_session(session, packet);
 					} else if (tcphead->seq == session->ack) { // resend
 						free((void*)packet);
