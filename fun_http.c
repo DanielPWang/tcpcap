@@ -715,16 +715,19 @@ void *HTTP_Thread(void* param)
 					assert(contentlen==0);
 					_add_finish_session(session, HTTP_SESSION_RESET);
 					free((void*)packet);
+					continue;
 				} else if (tcphead->fin) {
 					assert(contentlen==0);
 					_add_finish_session(session, HTTP_SESSION_FINISH);
 					free((void*)packet);
+					continue;
 				} else {	// maybe insert
-					if (tcphead->seq < session->seq) {
+					if (tcphead->seq < session->seq+session->contentlen) {
 						if (_insert_into_session(session, packet)==packet){ // resend
 							free((void*)packet);
 							continue;
 						}
+						// fix out of order
 						if (session->query_image == 0) {
 							if ((session->query_image=_check_http_or_query(content))) {
 								session->flag = HTTP_SESSION_REQUESTING;
@@ -738,9 +741,9 @@ void *HTTP_Thread(void* param)
 					} else {	// new, so end prev. or query0 + query1
 						struct iphdr* lip = IPHDR(session->lastdata);
 						struct tcphdr* ltcp=TCPHDR(lip);
-						if (FLOW_GET(ltcp)==S2C) {	// Q.R
+						if (FLOW_GET(ltcp)==S2C) {	// Q.R. now finish session and create new session
 							_add_finish_session(session, HTTP_SESSION_FINISH);
-						} else {
+						} else {	// Q0.Q1.Q2...
 							assert(FLOW_GET(ltcp)==C2S);
 							_append_packet_to_session(session, packet);
 							continue;
@@ -748,6 +751,10 @@ void *HTTP_Thread(void* param)
 					}
 				}
 			} 
+			if (contentlen == 0) {
+				free(packet);
+				continue;
+			}
 			session = _get_idl_session(DEBUG);
 			if (session) {	// new session
 				_init_new_http_session(session, packet);
@@ -765,19 +772,35 @@ void *HTTP_Thread(void* param)
 			assert(FLOW_GET(tcphead)==S2C);
 			struct http_session* session = FindSession(iphead->daddr, tcphead->dest);
 			if (session) {
-				if (_check_http_or_query(content)==3) { session->http = content; }	// HTTP/1.1
-
-				if (tcphead->seq > session->ack) {
-					_append_packet_to_session(session, packet);
-				} else if (tcphead->seq == session->ack) { // resend
-					free((void*)packet);
+				if (tcphead->rst) {
+					assert(contentlen==0);
+					_add_finish_session(session, HTTP_SESSION_RESET);
+					free(packet);
+					continue;
+				} else if (tcphead->fin) { // assume no out-of-order
+					assert(tcphead->seq == session->ack+session->contentlen);
+					if (contentlen>0) {
+						_append_packet_to_session(session, packet);
+					} else {
+						free(packet);
+					}
 					continue;
 				} else {
-					const void* p = _insert_into_session(session, packet);
-					if (p == packet) { free((void*)packet); } // resend
+					assert(contentlen>0);
+					if (_check_http_or_query(content)==3) { session->http = content; }	// HTTP/1.1
+
+					if (tcphead->seq >= session->ack+session->contentlen) {
+						_append_packet_to_session(session, packet);
+					} else if (tcphead->seq == session->ack) { // resend
+						free((void*)packet);
+						continue;
+					} else {
+						const void* p = _insert_into_session(session, packet);
+						if (p == packet) { free((void*)packet); } // resend
+						continue;
+					}
 					continue;
 				}
-				continue;
 			}
 		}
 
