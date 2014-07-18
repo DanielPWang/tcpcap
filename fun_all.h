@@ -28,6 +28,7 @@ struct http_session
 	uint32_t flag;		// HTTP_SESSION_???
 	uint32_t seq;		// client
 	uint32_t ack;		// client
+	uint32_t query_image;
 	uint32_t contentlen;	// len of last packet
 	uint32_t content_type;			   // 0:no match; 1:html; 2:file
 	uint32_t transfer_flag;
@@ -36,7 +37,7 @@ struct http_session
 	uint32_t http_content_remain;
 	struct timeval create;	// first
 	struct timeval update;	// the lasttime update. TODO: time_t
-	char* query_url;
+	char* query;
 	char* http;
 	char* response_head;
 	uint32_t response_head_len;	

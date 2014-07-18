@@ -6,13 +6,13 @@ CC = clang
 ifdef RELEASE
 	CFLAGS = -Wall -O3 -fomit-frame-pointer -march=prescott
 else
-	CFLAGS = -ggdb -O0 -pg
+	CFLAGS = -ggdb -O0 
 endif
 
 # CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99
 CFLAGS += -fPIC -march=core2 -DVER_SVNID=9  -std=gnu99 -D_GNU_SOURCE
 	
-LINKFLAGS = -Wl,-rpath,. -rdynamic -pg
+LINKFLAGS = -Wl,-rpath,. -rdynamic -lprofiler 
 # LINKFLAGS = -Wl,-rpath,. -shared -shared-libgcc
 
 INCDIR = -I../ -I./
