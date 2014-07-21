@@ -8,11 +8,7 @@
 enum HTTP_SESSION_FLAGS { 
 	HTTP_SESSION_IDL, 
 	HTTP_SESSION_NEW,
-	HTTP_SESSION_REQUESTING,
-	HTTP_SESSION_REQUEST, 
-	HTTP_SESSION_RESPONSEING,
-	HTTP_SESSION_REPONSE, 
-	HTTP_SESSION_REPONSE_ENTITY, 
+	HTTP_SESSION_WAITONESEC,
 	HTTP_SESSION_FINISH,
 	HTTP_SESSION_REUSED,
 	HTTP_SESSION_RESET,
@@ -21,6 +17,11 @@ enum HTTP_SESSION_FLAGS {
 	HTTP_SESSION_UNKNOWN
 };
 
+enum { HTTP_QUERY_NONE,
+	HTTP_QUERY_GET_POST,
+	HTTP_QUERY_OTHER,
+	HTTP_RESP_HTTP
+};
 enum HTTP_TRANSFER_FLAGS { 
 	HTTP_TRANSFER_NONE,
 	HTTP_TRANSFER_HAVE_CONTENT_LENGTH, 
@@ -87,7 +88,7 @@ enum HTTP_SPECIAL_STATE {
 // int isHTTP(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
 int HttpInit();
 int HttpStop();
-int FilterPacketForHttp(const char* buffer, const struct iphdr* iphead, const struct tcphdr* tcphead);
+int FilterPacketForHttp(char* buffer, struct iphdr* iphead, struct tcphdr* tcphead);
 int LoadHttpConf(const char* filename);
 int GetHttpData(char **data);
 uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData, int gz);

@@ -22,34 +22,30 @@ struct hosts_t
 // it should be http_session
 struct http_session
 {
+	uint32_t index;	// noused
 	struct hosts_t client;		// assume
 	struct hosts_t server;
-	uint32_t index;
 	uint32_t flag;		// HTTP_SESSION_???
 	uint32_t seq;		// client
 	uint32_t ack;		// client
 	uint32_t query_image;
-	//uint32_t contentlen;	// len of last packet
 	uint32_t content_type;			   // 0:no match; 1:html; 2:file
-	uint32_t transfer_flag;
-	uint32_t content_encoding;
-	uint32_t http_content_length;
-	uint32_t http_content_remain;
 	struct timeval create;	// first
 	struct timeval update;	// the lasttime update. TODO: time_t
 	char* query;
 	char* http;
-	char* response_head;
-	uint32_t response_head_len;	
-	void *data;
+	void *data;		// list
 	void *lastdata;
 	uint32_t packet_num;	// count of packets [data]
 
+	// be used by sm_xxxxxx
 	struct http_session *prev;
 	struct http_session *next;
+	// be used by HttpSession
+	struct http_session *_work_next;
 };
 
-struct http_sessions_t{
+struct http_sessions_group{
 	struct http_session* head;
 	pthread_mutex_t lock;
 	uint32_t	used;
@@ -66,8 +62,10 @@ void* LoadHost(char* hostsbuff);
 #define UDPHDR(ippacket) (struct udphdr*)((void*)(ippacket) + ((struct iphdr*)(ippacket))->ihl*4)
 #define FLOW_SET(tcphead, x) ((tcphead)->check = (x))
 #define FLOW_GET(tcphead) ((tcphead)->check)
+#define CONTENT_GET(tcphead) ((void*)tcphead + tcphead->doff*4)
 #define CONTENT_LEN_GET(tcphead) ((tcphead)->window)
 #define CONTENT_LEN_SET(tcphead, x) do { (tcphead)->window = x; } while(0)
+// only for debug
 #define FRAME_NUM_SET(packet) (*(uint32_t*)(packet) = ++packet_num)
 #define FRAME_NUM_GET(packet) (*(uint32_t*)(packet))
 
