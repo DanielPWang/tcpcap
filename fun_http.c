@@ -97,22 +97,12 @@ struct _type_content_t CONTENT_TYPE[] = {
 uint32_t _check_http_or_query(const void* content)
 {
 	uint32_t image = *(uint32_t *)content; 
-	switch(image) { 
-		case _http_image: 
-			return HTTP_RESP_HTTP; break; 
-		case _get_image: 
-		case _post_image: 
-		  return HTTP_QUERY_GET_POST; break; 
-		case _options_image: 
-		case _trace_image: 
-		case _put_image: 
-		case _delete_image: 
-		case _head_image: 
-		  return HTTP_QUERY_OTHER; break; 
-		default: 
-		  return HTTP_QUERY_NONE; 
-	} 
-	assert(0); 
+	if (image == _http_image) return HTTP_RESP_HTTP;
+	if (image == _get_image || image == _post_image) return HTTP_QUERY_GET_POST;
+	if (image==_head_image || image==_put_image || image==_delete_image
+			|| image==_options_image || image==_trace_image) {
+		return HTTP_QUERY_OTHER;
+	}
 	return HTTP_QUERY_NONE;
 }
 
@@ -120,7 +110,7 @@ uint32_t _check_http_or_query(const void* content)
 #define IMAGE1024 1024
 struct http_session* sm_AddSession(struct http_session* session)
 {	// always insert into head
-	uint16_t index = session->client.port&1023u;
+	uint16_t index = (session->client.port)&1023u;
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	struct http_session* head = _sessions_group[index].head;
 	session->prev = NULL;
@@ -133,7 +123,7 @@ struct http_session* sm_AddSession(struct http_session* session)
 }
 struct http_session* sm_DelSession(struct http_session* session)
 {
-	uint16_t index = session->client.port&1023u;
+	uint16_t index = (session->client.port)&1023u;
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	if (session->prev) {
 		session->prev->next = session->next;
@@ -145,6 +135,7 @@ struct http_session* sm_DelSession(struct http_session* session)
 	pthread_mutex_unlock(&_sessions_group[index].lock);
 	return session;
 }
+// port: ntohs ip = inet_addr()
 struct http_session* sm_FindSession(uint32_t ip, uint16_t port)
 {
 	uint16_t index = port & 1023u;
@@ -320,30 +311,30 @@ void *_process_timeout(void* p)
 				_del_session_from_working_next(prev, cur);
 				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
-				INC_WHOLE_HTML_SESSION;
 				continue;
 			} 
 			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
 				LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 						index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
 				cur->flag = HTTP_SESSION_TIMEOUT;
+				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
 				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
-				INC_WHOLE_HTML_SESSION;
 				continue;
 			}
 			if (cur->flag==HTTP_SESSION_WAITONESEC && _http_active-cur->update.tv_sec > broken_time) {
 					LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
 				cur->flag = HTTP_SESSION_TIMEOUT;
+				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
 				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
-				INC_WHOLE_HTML_SESSION;
 				continue;
 			}
 			prev = cur;
+			cur = cur->_work_next;
 		}
 		end = time(NULL);
 		SET_ACTIVE_SESSION_COUNT(count);
@@ -369,7 +360,11 @@ void *HTTP_Thread(void* param)
 		//iphead->tot_len = ntohs(iphead->tot_len);
 		int contentlen = CONTENT_LEN_GET(tcphead);
 		assert(contentlen>1||tcphead->fin||tcphead->rst);
-		_http_active = tv->tv_sec;
+		if (DEBUG) {
+			_http_active = *(uint32_t*)packet;
+		} else {
+		   	_http_active = tv->tv_sec;
+		}
 		assert(contentlen<1600);	// TODO: for test
 
 		if (contentlen>=RECV_BUFFER_LEN) { 
@@ -380,6 +375,12 @@ void *HTTP_Thread(void* param)
 		// ntohl
 		tcphead->seq = ntohl(tcphead->seq);
 		tcphead->ack_seq = ntohl(tcphead->ack_seq);
+		tcphead->source = ntohs(tcphead->source);
+		tcphead->dest = ntohs(tcphead->dest);
+
+		if (*(int*)packet == 315) {
+			LOGERROR0("DEBUG...");
+		}
 
 		struct http_session* session = FindHttpSession(iphead, tcphead);
 		if (FLOW_GET(tcphead)==C2S) {
@@ -469,9 +470,9 @@ int HttpInit()
 	g_nMaxHttpPacketCount = GetValue_i(CONFIG_PATH, "max_packet_count");
 	g_nHttpTimeout = GetValue_i(CONFIG_PATH, "http_timeout");
 
-	LOGINFO("max_http_session_count = %d\n", g_nMaxHttpSessionCount);
-	LOGINFO("max_http_packet_count = %d\n", g_nMaxHttpPacketCount);
-	LOGINFO("max_http_timeout = %d\n", g_nHttpTimeout);
+	LOGINFO("max_http_session_count = %d", g_nMaxHttpSessionCount);
+	LOGINFO("max_http_packet_count = %d", g_nMaxHttpPacketCount);
+	LOGINFO("max_http_timeout = %d", g_nHttpTimeout);
 		
 	_packets = init_queue(g_nMaxHttpPacketCount);
 	ASSERT(_packets != NULL);

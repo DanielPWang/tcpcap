@@ -596,10 +596,7 @@ void* client_thread(void *p)
 				datalen = _get_data_from_db(&data);
 				fromdb = 1;
 			}
-			if (datalen == 0) {
-				sleep(1);
-				continue;
-			}
+			if (datalen == 0) { continue; }
 		}
 		if (_client_socket == -1) {
 			if (!fromdb) {
