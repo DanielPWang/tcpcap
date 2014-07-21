@@ -111,6 +111,7 @@ uint32_t _check_http_or_query(const void* content)
 struct http_session* sm_AddSession(struct http_session* session)
 {	// always insert into head
 	uint16_t index = (session->client.port)&1023u;
+	LOGDEBUG("FindSession: %08X, %d, %d", session->client.ip.s_addr, session->client.port, index);
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	struct http_session* head = _sessions_group[index].head;
 	session->prev = NULL;
@@ -124,6 +125,7 @@ struct http_session* sm_AddSession(struct http_session* session)
 struct http_session* sm_DelSession(struct http_session* session)
 {
 	uint16_t index = (session->client.port)&1023u;
+	LOGDEBUG("FindSession: %08X, %d, %d", session->client.ip.s_addr, session->client.port, index);
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	if (session->prev) {
 		session->prev->next = session->next;
@@ -139,6 +141,7 @@ struct http_session* sm_DelSession(struct http_session* session)
 struct http_session* sm_FindSession(uint32_t ip, uint16_t port)
 {
 	uint16_t index = port & 1023u;
+	LOGDEBUG("FindSession: %08X, %d, %d", ip, port, index);
 	struct http_session *session = _sessions_group[index].head;
 	while (session) {
 		if (session->client.ip.s_addr==ip&&session->client.port==port) {
@@ -196,12 +199,12 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 	}
 	session->http = NULL;
 	// should in NewHttpSession
+	session->_work_next = NULL;
 	pthread_mutex_lock(&_http_session_lock);
 	if (_http_session_tail) {
 		_http_session_tail->_work_next = session;
 		_http_session_tail = session;
 	} else {
-		session->_work_next = NULL;
 		_http_session_head = _http_session_tail = session;
 	}
 	pthread_mutex_unlock(&_http_session_lock);
@@ -293,7 +296,7 @@ void _del_session_from_working_next(struct http_session* prev, struct http_sessi
 void *_process_timeout(void* p)
 {
 	int broken_time = 1;
-	if (DEBUG) broken_time = 2000;
+	if (DEBUG) broken_time = 10000;
 	time_t start, end;
 	start = end = time(NULL);
 	uint32_t count = 0;
@@ -307,10 +310,11 @@ void *_process_timeout(void* p)
 		count = 0;
 		while (cur)	{
 			++count;
-			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET) {
+			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
+					|| cur->flag==HTTP_SESSION_REUSED) {
 				_del_session_from_working_next(prev, cur);
-				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
+				push_queue(_whole_content, cur);
 				continue;
 			} 
 			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
@@ -319,8 +323,8 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
+				push_queue(_whole_content, cur);
 				continue;
 			}
 			if (cur->flag==HTTP_SESSION_WAITONESEC && _http_active-cur->update.tv_sec > broken_time) {
@@ -329,8 +333,8 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
+				push_queue(_whole_content, cur);
 				continue;
 			}
 			prev = cur;
@@ -357,14 +361,8 @@ void *HTTP_Thread(void* param)
 		struct timeval *tv = (struct timeval*)packet;
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
-		//iphead->tot_len = ntohs(iphead->tot_len);
 		int contentlen = CONTENT_LEN_GET(tcphead);
 		assert(contentlen>1||tcphead->fin||tcphead->rst);
-		if (DEBUG) {
-			_http_active = *(uint32_t*)packet;
-		} else {
-		   	_http_active = tv->tv_sec;
-		}
 		assert(contentlen<1600);	// TODO: for test
 
 		if (contentlen>=RECV_BUFFER_LEN) { 
@@ -372,6 +370,7 @@ void *HTTP_Thread(void* param)
 			continue; 
 		} 
 		char *content = (void*)tcphead + tcphead->doff*4;
+		_http_active = tv->tv_sec;
 		// ntohl
 		tcphead->seq = ntohl(tcphead->seq);
 		tcphead->ack_seq = ntohl(tcphead->ack_seq);
@@ -451,7 +450,7 @@ int HttpStop()
 {
 	while (DEBUG) {	// TODO: I want to process all packets.
 		if (len_queue(_packets)==0 && len_queue(_whole_content)==0) break;
-		_http_active += g_nHttpTimeout/5;
+		_http_active += g_nHttpTimeout/20;
 		sleep(1);
 	}
 	_http_living = 0;

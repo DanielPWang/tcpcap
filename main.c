@@ -13,7 +13,7 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <arpa/inet.h>
-#include <gperftools/profiler.h>
+//#include <gperftools/profiler.h>
 
 #include "utils.h"
 #include "iface.h"
@@ -138,7 +138,7 @@ int main(int argc, char* argv[])
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);
 	int nrecv = 0;
 	
-	ProfilerStart("./gperf.gmon");
+	// ProfilerStart("./gperf.gmon");
 	while (Living) 
 	{
 		if (buffer == NULL) buffer = calloc( 8, RECV_BUFFER_LEN/8); // TODO:
@@ -169,12 +169,12 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-	ProfilerFlush();
+	// ProfilerFlush();
 	LOGINFO0("ready to exit...");
 	HttpStop();
 	StopServer();
 	LOGINFO0("exit server...");
-	ProfilerStop();
+	// ProfilerStop();
 	close_log();
 	StopShowStatis();
 	PrintStatis();

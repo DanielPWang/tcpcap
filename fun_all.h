@@ -66,7 +66,7 @@ void* LoadHost(char* hostsbuff);
 #define CONTENT_LEN_GET(tcphead) ((tcphead)->window)
 #define CONTENT_LEN_SET(tcphead, x) do { (tcphead)->window = x; } while(0)
 // only for debug
-#define FRAME_NUM_SET(packet) (*(uint32_t*)(packet) = ++packet_num)
+#define FRAME_NUM_SET(packet) (((struct timeval*)(packet))->tv_sec = ++packet_num)
 #define FRAME_NUM_GET(packet) (*(uint32_t*)(packet))
 
 #endif
