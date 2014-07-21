@@ -176,6 +176,7 @@ int main(int argc, char* argv[])
 	LOGINFO0("exit server...");
 	ProfilerStop();
 	close_log();
+	StopShowStatis();
 	PrintStatis();
 	return 0;
 }

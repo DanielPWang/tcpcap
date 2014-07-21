@@ -3,7 +3,8 @@
 #include <unistd.h>
 #include <pthread.h>
 
-extern volatile int Living;
+static volatile int Living = 1;
+static pthread_t pid;
 
 uint32_t total_pcap = 0u;
 uint32_t packets_pushed = 0u;
@@ -17,6 +18,7 @@ uint32_t drop_http_image = 0u;
 uint32_t http_image = 0u;
 // here isnt statis
 uint32_t packet_num = 0u;
+uint32_t session_count = 0u;
 
 #define P(x) printf("\t" #x " = %u\n", x)
 void PrintStatis()
@@ -28,21 +30,22 @@ void PrintStatis()
 	P(new_http_session);
 	P(http_image);
 	P(sent_count);
+	P(session_count);
 	P(whole_html_session);
 	P(drop_packet_count);
 	P(drop_http_image);
 }
 void PrintTitle()
 {
-	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tGETPOST\tNEWSESSION\tHTTPIMAGE\tSEND\tWHOLE\tDROPPKT\n");
+	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tGETPOST\tNEWSESSION\tHTTPIMAGE\tSEND\tACTSESSION\tWHOLE\tDROPPKT\n");
 }
 void PrintStati()
 {
 	time_t now = time(NULL);
 	char stime[64];
 	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
-	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
-			packets_pop, get_post_count, new_http_session, http_image, sent_count, 
+	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
+			packets_pop, get_post_count, new_http_session, http_image, sent_count, session_count,
 			whole_html_session, drop_packet_count);
 }
 void* _show_statis_thread(void* p)
@@ -56,6 +59,10 @@ void* _show_statis_thread(void* p)
 }
 void StartShowStatis()
 {
-	pthread_t pid;
 	pthread_create(&pid, NULL, _show_statis_thread, NULL);
+}
+void StopShowStatis()
+{
+	void* p;
+	pthread_join(pid, &p);
 }

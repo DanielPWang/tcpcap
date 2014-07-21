@@ -214,6 +214,7 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 		_http_session_head = _http_session_tail = session;
 	}
 	pthread_mutex_unlock(&_http_session_lock);
+	sm_AddSession(session);
 	return session;
 }
 void AppendPacketToHttpSession(struct http_session* session, void *packet)
@@ -237,8 +238,8 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 		struct tcphdr* tcp = TCPHDR(ip);
 		char* content = CONTENT_GET(tcp);
 		session->query_image = _check_http_or_query(content);
-		if (session->query_image!=HTTP_QUERY_NONE) {
-			assert(session->query_image!=HTTP_RESP_HTTP);
+		if (session->query_image==HTTP_QUERY_GET_POST
+				|| session->query_image==HTTP_QUERY_OTHER) {
 			session->query = content;
 		}
 	}
@@ -302,18 +303,24 @@ void *_process_timeout(void* p)
 {
 	int broken_time = 1;
 	if (DEBUG) broken_time = 2000;
+	time_t start, end;
+	start = end = time(NULL);
+	uint32_t count = 0;
 
 	while (_http_living) {
-		sleep(1);
-		if (_http_active == 0) continue;
+		if (end-start == 0) sleep(1);
 
+		start = time(NULL);
 		struct http_session* cur = _http_session_head;
 		struct http_session* prev = NULL;
+		count = 0;
 		while (cur)	{
+			++count;
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET) {
 				_del_session_from_working_next(prev, cur);
 				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
+				INC_WHOLE_HTML_SESSION;
 				continue;
 			} 
 			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
@@ -323,6 +330,7 @@ void *_process_timeout(void* p)
 				_del_session_from_working_next(prev, cur);
 				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
+				INC_WHOLE_HTML_SESSION;
 				continue;
 			}
 			if (cur->flag==HTTP_SESSION_WAITONESEC && _http_active-cur->update.tv_sec > broken_time) {
@@ -332,10 +340,13 @@ void *_process_timeout(void* p)
 				_del_session_from_working_next(prev, cur);
 				push_queue(_whole_content, cur);
 				cur = cur->_work_next;
+				INC_WHOLE_HTML_SESSION;
 				continue;
 			}
 			prev = cur;
 		}
+		end = time(NULL);
+		SET_ACTIVE_SESSION_COUNT(count);
 	}
 	return NULL;
 }
@@ -345,39 +356,6 @@ void *_process_timeout(void* p)
 // return NULL: session->head packet: resend other: prev
 
 
-void *HTTP_Thread0(void* param)
-{
-	while (_http_living) {
-		char* packet = (char*)pop_queue_timedwait(_packets);
-		if (packet == NULL) continue;
-		INC_POP_PACKETS;
-
-		// !rst !fin tcp.len<2; free it
-		// find session (ip, tcp)
-		// if session. 
-		//	if C2S(packet) 
-		//		if rst or finish
-		//			finish(session, finish), 
-		//		if lastpacket(session) is S2C
-		//			finish(session, finish)
-		//		if lastpacket(session) is C2S
-		//			append(session, packet)
-		//		else
-		//			createNewsession
-		//	if S2C(packet)
-		//		append(session, packet)
-		//		if fin or rst
-		//			finish(session, waitonesec)
-		//		else 
-		//			append
-		//	else session==NULL
-		//		if C2S(packet):
-		//			create newsession
-		//	else 
-		//		free
-	}
-	return NULL;
-}
 void *HTTP_Thread(void* param)
 {
 	while (_http_living) {
@@ -390,7 +368,7 @@ void *HTTP_Thread(void* param)
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		//iphead->tot_len = ntohs(iphead->tot_len);
 		int contentlen = CONTENT_LEN_GET(tcphead);
-		assert(contentlen>1);
+		assert(contentlen>1||tcphead->fin||tcphead->rst);
 		_http_active = tv->tv_sec;
 		assert(contentlen<1600);	// TODO: for test
 
@@ -407,15 +385,11 @@ void *HTTP_Thread(void* param)
 		if (FLOW_GET(tcphead)==C2S) {
 			if (session) {
 				if (tcphead->rst) {	// reuse
-					assert(contentlen==0);
 					FinishHttpSession(session, HTTP_SESSION_RESET);
-					free((void*)packet);
-					continue;
+					goto NEWSESSION0;
 				} else if (tcphead->fin) {
-					assert(contentlen==0);
 					FinishHttpSession(session, HTTP_SESSION_FINISH);
-					free((void*)packet);
-					continue;
+					goto NEWSESSION0;
 				} else {
 					// new, so end prev. or query0 + query1
 					struct iphdr* lip = IPHDR(session->lastdata);
@@ -429,6 +403,7 @@ void *HTTP_Thread(void* param)
 					}
 				}
 			} 
+NEWSESSION0:
 			if (contentlen == 0) {
 				free(packet);
 				continue;
@@ -463,6 +438,7 @@ void *HTTP_Thread(void* param)
 			}
 		}
 
+		INC_DROP_PACKET;
 		LOGWARN("Cannt process this packet. %u", *(uint32_t*)packet);
 		free((void*)packet); 
 	}
@@ -558,8 +534,7 @@ int FilterPacketForHttp(char* buffer, struct iphdr* iphead, struct tcphdr* tcphe
 	struct tcphdr* tcphd = (struct tcphdr*)tcphead;
 	iphead->tot_len = ntohs(iphead->tot_len);
 	int contentlen = iphead->tot_len - iphead->ihl*4 - tcphead->doff*4;
-	if (contentlen==1) { contentlen = 0; }
-	if ((contentlen==0&&!tcphead->fin&&!tcphead->rst)) { 
+	if ((contentlen<2&&!tcphead->fin&&!tcphead->rst)) { 
 		return -1;
 	} 
 	CONTENT_LEN_SET(tcphd, contentlen);
@@ -673,7 +648,7 @@ uint32_t TransGzipData(const char *pGzipData, int nDataLen, char **pTransData, i
 int GetHttpData(char **data)
 {
 	*data = NULL;
-	if (_whole_content == NULL) return 0;
+	if (_whole_content==NULL) return 0;
 	struct http_session *pSession = (struct http_session*)pop_queue(_whole_content);
 	if (pSession == NULL) return 0;
 	
