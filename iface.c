@@ -78,6 +78,7 @@ int OpenPcapFile(const char* pcapfile, const char* filter)
 
 	pcap_freecode(&fp);
 	free(errbuff);
+	free((void*)filter);
 	return 1;
 }
 

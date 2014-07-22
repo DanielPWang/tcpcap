@@ -111,7 +111,7 @@ uint32_t _check_http_or_query(const void* content)
 struct http_session* sm_AddSession(struct http_session* session)
 {	// always insert into head
 	uint16_t index = (session->client.port)&1023u;
-	LOGDEBUG("FindSession: %08X, %d, %d", session->client.ip.s_addr, session->client.port, index);
+	// LOGDEBUG("AddSession: %08X, %d, %d", session->client.ip.s_addr, session->client.port, index);
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	struct http_session* head = _sessions_group[index].head;
 	session->prev = NULL;
@@ -129,7 +129,9 @@ struct http_session* sm_DelSession(struct http_session* session)
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	if (session->prev) {
 		session->prev->next = session->next;
-	} 
+	} else {
+		_sessions_group[index].head = session->next;
+	}
 	if (session->next) {
 		session->next->prev = session->prev;
 	}
@@ -141,7 +143,7 @@ struct http_session* sm_DelSession(struct http_session* session)
 struct http_session* sm_FindSession(uint32_t ip, uint16_t port)
 {
 	uint16_t index = port & 1023u;
-	LOGDEBUG("FindSession: %08X, %d, %d", ip, port, index);
+	// LOGDEBUG("FindSession: %08X, %d, %d", ip, port, index);
 	struct http_session *session = _sessions_group[index].head;
 	while (session) {
 		if (session->client.ip.s_addr==ip&&session->client.port==port) {
@@ -170,7 +172,7 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 {
 	assert(session && packet);
 	bzero(session, sizeof(*session));	// TODO: for debug
-	struct timeval* tv = (struct timeval*)packet;
+	struct timeval tv = *(struct timeval*)packet;
 	struct iphdr* ip = IPHDR(packet);
 	struct tcphdr* tcp = TCPHDR(ip);
 	uint32_t contentlen = CONTENT_LEN_GET(tcp);
@@ -186,8 +188,8 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 	//session->seq	= tcp->seq+contentlen;
 	// session->ack	= tcp->ack_seq;
 	session->content_type= HTTP_CONTENT_NONE;
-	session->create	= *tv;
-	session->update = *tv;
+	session->create	= tv;
+	session->update = tv;
 	*(void**)packet = NULL;
 	session->data = packet;
 	session->lastdata = packet;
@@ -197,7 +199,7 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 	if (session->query_image) {
 		session->query = content;
 		char sip[18], dip[18];
-		LOGDEBUG("New Session:%u %s:%u -> %s:%u %s", tv->tv_sec, 
+		LOGDEBUG("New Session:%u %s:%u -> %s:%u %s", tv.tv_sec, 
 				inet_ntop(AF_INET, &ip->saddr, sip, sizeof(sip)), tcp->source,
 				inet_ntop(AF_INET, &ip->daddr, dip, sizeof(dip)), tcp->dest,
 				content);
@@ -205,6 +207,7 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 		session->query = NULL;
 	}
 	session->http = NULL;
+	session->prev = session->next = NULL;
 	// should in NewHttpSession
 	session->_work_next = NULL;
 	pthread_mutex_lock(&_http_session_lock);
@@ -216,14 +219,15 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 	}
 	pthread_mutex_unlock(&_http_session_lock);
 	sm_AddSession(session);
+	INC_NEW_HTTP_SESSION;
 	return session;
 }
 void AppendPacketToHttpSession(struct http_session* session, void *packet)
 {
 	++session->packet_num;
-	struct timeval* tv = (struct timeval*)packet;
+	struct timeval tv = *(struct timeval*)packet;
 	char sip[18], dip[18];
-	session->update = *tv;
+	session->update = tv;
 	if (session->content_type==HTTP_CONTENT_STREAM) {
 		free(packet);
 	} else {
@@ -242,7 +246,7 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 			if (session->query_image==HTTP_QUERY_GET_POST
 					|| session->query_image==HTTP_QUERY_OTHER) {
 				session->query = content;
-				LOGDEBUG("New Session:%u %s:%u -> %s:%u %s", tv->tv_sec, 
+				LOGDEBUG("New Session:%u %s:%u -> %s:%u %s", tv.tv_sec, 
 						inet_ntop(AF_INET, &ip->saddr, sip, sizeof(sip)), tcp->source,
 						inet_ntop(AF_INET, &ip->daddr, dip, sizeof(dip)), tcp->dest,
 						content);
@@ -254,7 +258,7 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 			char* content = CONTENT_GET(tcp);
 			if (*(uint32_t*)content == _http_image) {
 				session->http = content;
-				LOGDEBUG("Response:%u %s:%u -> %s:%u %s", tv->tv_sec, 
+				LOGDEBUG("Response:%u %s:%u -> %s:%u %s", tv.tv_sec, 
 						inet_ntop(AF_INET, &ip->saddr, sip, sizeof(sip)), tcp->source,
 						inet_ntop(AF_INET, &ip->daddr, dip, sizeof(dip)), tcp->dest,
 						content);
@@ -292,6 +296,12 @@ struct http_session* CleanHttpSession(struct http_session* pSession)
 	assert(pSession->flag!=HTTP_SESSION_IDL);
 	
 	CleanPacketList(pSession->data);
+	/*void* packet = pSession->data;
+	while (packet!=NULL) {
+		void* tmp = packet;
+		packet = *(void**)packet;
+		free(tmp);
+	}*/
 
 	//bzero(pSession, sizeof(*pSession));
 	//push_queue(_idl_session, pSession);
@@ -307,7 +317,18 @@ void _del_session_from_working_next(struct http_session* prev, struct http_sessi
 	} else {
 		_http_session_head = bedel->_work_next;
 	}
+	if (_http_session_tail==bedel) {
+		_http_session_tail = prev;
+	}
 	pthread_mutex_unlock(&_http_session_lock);
+}
+void _show_working_session()
+{
+	struct http_session* cur = _http_session_head;
+	while (cur) {
+		printf("%p ", cur);
+		cur = cur->_work_next;
+	}
 }
 void *_process_timeout(void* p)
 {
@@ -329,9 +350,8 @@ void *_process_timeout(void* p)
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
 					|| cur->flag==HTTP_SESSION_REUSED) {
 				_del_session_from_working_next(prev, cur);
-				struct http_session* tmp = cur->_work_next;
 				push_queue(_whole_content, cur);
-				cur = tmp;
+				cur = prev? prev->_work_next:NULL;
 				continue;
 			} 
 			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
@@ -340,9 +360,8 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				struct http_session* tmp = cur->_work_next;
 				push_queue(_whole_content, cur);
-				cur = tmp;
+				cur = prev? prev->_work_next:NULL;
 				continue;
 			}
 			if (cur->flag==HTTP_SESSION_WAITONESEC && _http_active-cur->update.tv_sec > broken_time) {
@@ -351,8 +370,7 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				cur = cur->_work_next;
-				push_queue(_whole_content, cur);
+				cur = prev? prev->_work_next:NULL;
 				continue;
 			}
 			prev = cur;
@@ -384,6 +402,7 @@ void *HTTP_Thread(void* param)
 		assert(contentlen<1600);	// TODO: for test
 
 		if (contentlen>=RECV_BUFFER_LEN) { 
+			LOGFATAL("[%lu] content is too long. %u", tv->tv_sec, contentlen);
 			free((void*)packet); 
 			continue; 
 		} 
@@ -395,19 +414,19 @@ void *HTTP_Thread(void* param)
 		tcphead->source = ntohs(tcphead->source);
 		tcphead->dest = ntohs(tcphead->dest);
 
-		if (*(int*)packet == 2235054) {
+		if (*(int*)packet == 1902) {
 			LOGERROR0("DEBUG...");
 		}
 
 		struct http_session* session = FindHttpSession(iphead, tcphead);
 		if (FLOW_GET(tcphead)==C2S) {
 			if (session) {
+				assert(session->flag!=HTTP_SESSION_RESET);
+				assert(session->flag!=HTTP_SESSION_FINISH);
 				if (tcphead->rst) {	// reuse
 					FinishHttpSession(session, HTTP_SESSION_RESET);
-					goto NEWSESSION0;
 				} else if (tcphead->fin) {
 					FinishHttpSession(session, HTTP_SESSION_FINISH);
-					goto NEWSESSION0;
 				} else {
 					// new, so end prev. or query0 + query1
 					struct iphdr* lip = IPHDR(session->lastdata);
@@ -436,10 +455,15 @@ NEWSESSION0:
 		} else {
 			assert(FLOW_GET(tcphead)==S2C);
 			if (session) {
+				assert(session->flag!=HTTP_SESSION_RESET);
+				assert(session->flag!=HTTP_SESSION_FINISH);
 				if (tcphead->rst) {
-					assert(contentlen==0);
+					if (contentlen>0) {
+						AppendPacketToHttpSession(session, packet);
+					} else {
+						free(packet);
+					}
 					FinishHttpSession(session, HTTP_SESSION_RESET);
-					free(packet);
 					continue;
 				} else if (tcphead->fin) { 
 					if (contentlen>0) {
@@ -572,11 +596,11 @@ int FilterPacketForHttp(char* buffer, struct iphdr* iphead, struct tcphdr* tcphe
 	pthread_mutex_lock(&_host_ip_lock);
 	
 	if (inHosts(_valid_hosts, &host)!=NULL ) {
-		nRs = PushHttpPack(buffer, iphead, tcphead);
 		FLOW_SET(tcphd, S2C);
-	} else if (inHosts(_valid_hosts, &host1)!=NULL) {
 		nRs = PushHttpPack(buffer, iphead, tcphead);
+	} else if (inHosts(_valid_hosts, &host1)!=NULL) {
 		FLOW_SET(tcphd, C2S);
+		nRs = PushHttpPack(buffer, iphead, tcphead);
 	}
 	pthread_mutex_unlock(&_host_ip_lock);
 
