@@ -164,10 +164,12 @@ void sm_Destory()
 {	// to clean everything. but just do noting
 }
 //////////////////////////// http_session funtions
-#define NewHttpSession() ((struct http_session*)pop_queue_timedwait(_idl_session))
+//#define NewHttpSession() ((struct http_session*)pop_queue_timedwait(_idl_session))
+#define NewHttpSession() ((struct http_session*)malloc(sizeof(struct http_session)))
 struct http_session* InitHttpSession(struct http_session* session, void *packet)
 {
 	assert(session && packet);
+	bzero(session, sizeof(*session));	// TODO: for debug
 	struct timeval* tv = (struct timeval*)packet;
 	struct iphdr* ip = IPHDR(packet);
 	struct tcphdr* tcp = TCPHDR(ip);
@@ -194,6 +196,11 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 	session->query_image = _check_http_or_query(content);
 	if (session->query_image) {
 		session->query = content;
+		char sip[18], dip[18];
+		LOGDEBUG("New Session:%u %s:%u -> %s:%u %s", tv->tv_sec, 
+				inet_ntop(AF_INET, &ip->saddr, sip, sizeof(sip)), tcp->source,
+				inet_ntop(AF_INET, &ip->daddr, dip, sizeof(dip)), tcp->dest,
+				content);
 	} else {
 		session->query = NULL;
 	}
@@ -213,7 +220,9 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 }
 void AppendPacketToHttpSession(struct http_session* session, void *packet)
 {
+	++session->packet_num;
 	struct timeval* tv = (struct timeval*)packet;
+	char sip[18], dip[18];
 	session->update = *tv;
 	if (session->content_type==HTTP_CONTENT_STREAM) {
 		free(packet);
@@ -221,28 +230,35 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 		*(void**)packet = NULL;
 		*(void**)session->lastdata = packet;
 		session->lastdata = packet;
-	}
-	++session->packet_num;
-	// > 20M
-	if (session->content_type==HTTP_CONTENT_NONE && session->packet_num>2000) {
-		session->content_type=HTTP_CONTENT_STREAM;
-	}
-	if (session->query_image == HTTP_QUERY_NONE) {
-		struct iphdr* ip = IPHDR(packet);
-		struct tcphdr* tcp = TCPHDR(ip);
-		char* content = CONTENT_GET(tcp);
-		session->query_image = _check_http_or_query(content);
-		if (session->query_image==HTTP_QUERY_GET_POST
-				|| session->query_image==HTTP_QUERY_OTHER) {
-			session->query = content;
+		// > 20M
+		if (session->content_type==HTTP_CONTENT_NONE && session->packet_num>2000) {
+			session->content_type=HTTP_CONTENT_STREAM;
 		}
-	}
-	if (session->http == NULL) {
-		struct iphdr* ip = IPHDR(packet);
-		struct tcphdr* tcp = TCPHDR(ip);
-		char* content = CONTENT_GET(tcp);
-		if (*(uint32_t*)content == _http_image) {
-			session->http = content;
+		if (session->query_image == HTTP_QUERY_NONE) {
+			struct iphdr* ip = IPHDR(packet);
+			struct tcphdr* tcp = TCPHDR(ip);
+			char* content = CONTENT_GET(tcp);
+			session->query_image = _check_http_or_query(content);
+			if (session->query_image==HTTP_QUERY_GET_POST
+					|| session->query_image==HTTP_QUERY_OTHER) {
+				session->query = content;
+				LOGDEBUG("New Session:%u %s:%u -> %s:%u %s", tv->tv_sec, 
+						inet_ntop(AF_INET, &ip->saddr, sip, sizeof(sip)), tcp->source,
+						inet_ntop(AF_INET, &ip->daddr, dip, sizeof(dip)), tcp->dest,
+						content);
+			}
+		}
+		if (session->http == NULL) {
+			struct iphdr* ip = IPHDR(packet);
+			struct tcphdr* tcp = TCPHDR(ip);
+			char* content = CONTENT_GET(tcp);
+			if (*(uint32_t*)content == _http_image) {
+				session->http = content;
+				LOGDEBUG("Response:%u %s:%u -> %s:%u %s", tv->tv_sec, 
+						inet_ntop(AF_INET, &ip->saddr, sip, sizeof(sip)), tcp->source,
+						inet_ntop(AF_INET, &ip->daddr, dip, sizeof(dip)), tcp->dest,
+						content);
+			}
 		}
 	}
 }
@@ -277,9 +293,9 @@ struct http_session* CleanHttpSession(struct http_session* pSession)
 	
 	CleanPacketList(pSession->data);
 
-	bzero(pSession, sizeof(*pSession));
-	
-	push_queue(_idl_session, pSession);
+	//bzero(pSession, sizeof(*pSession));
+	//push_queue(_idl_session, pSession);
+	free(pSession);
 	return pSession;
 }
 
@@ -302,7 +318,7 @@ void *_process_timeout(void* p)
 	uint32_t count = 0;
 
 	while (_http_living) {
-		if (end-start == 0) sleep(1);
+		if (end-start == 0) usleep(100000);
 
 		start = time(NULL);
 		struct http_session* cur = _http_session_head;
@@ -313,8 +329,9 @@ void *_process_timeout(void* p)
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
 					|| cur->flag==HTTP_SESSION_REUSED) {
 				_del_session_from_working_next(prev, cur);
-				cur = cur->_work_next;
+				struct http_session* tmp = cur->_work_next;
 				push_queue(_whole_content, cur);
+				cur = tmp;
 				continue;
 			} 
 			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
@@ -323,8 +340,9 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				cur = cur->_work_next;
+				struct http_session* tmp = cur->_work_next;
 				push_queue(_whole_content, cur);
+				cur = tmp;
 				continue;
 			}
 			if (cur->flag==HTTP_SESSION_WAITONESEC && _http_active-cur->update.tv_sec > broken_time) {
@@ -377,7 +395,7 @@ void *HTTP_Thread(void* param)
 		tcphead->source = ntohs(tcphead->source);
 		tcphead->dest = ntohs(tcphead->dest);
 
-		if (*(int*)packet == 315) {
+		if (*(int*)packet == 2235054) {
 			LOGERROR0("DEBUG...");
 		}
 
@@ -440,6 +458,16 @@ NEWSESSION0:
 
 		INC_DROP_PACKET;
 		LOGWARN("Cannt process this packet. %u", *(uint32_t*)packet);
+		uint32_t image = *(uint32_t*)content;
+		if (image==_get_image || image==_post_image || image==_http_image || image==_head_image 
+				|| image==_put_image || image==_options_image || image==_delete_image || image==_trace_image)
+		{
+			char sip[18], dip[18];
+			LOGDEBUG("Miss Session:%u %s:%u -> %s:%u %s", tv->tv_sec, 
+					inet_ntop(AF_INET, &iphead->saddr, sip, sizeof(sip)), tcphead->source,
+					inet_ntop(AF_INET, &iphead->daddr, dip, sizeof(dip)), tcphead->dest,
+					content);
+		}
 		free((void*)packet); 
 	}
 	printf("Exit http thread.\n");

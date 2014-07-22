@@ -63,6 +63,7 @@ void StartShowStatis()
 }
 void StopShowStatis()
 {
+	Living = 0;
 	void* p;
 	pthread_join(pid, &p);
 }
