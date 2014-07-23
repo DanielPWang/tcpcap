@@ -6,6 +6,7 @@
 #define __UTILS_H__
 
 #include <assert.h>
+//#include <syslog.h>
 
 /**
  * @brief split left=right with delim(=)
@@ -19,6 +20,7 @@ int split_line( char* line, char** left, char** right, const char delim);
 char* strtrim(char* str, const char* ignore);
 
 enum LOG_LEVEL { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
+// enum LOG_LEVEL { LOG_TRACE, LOG_WARN, LOG_ERROR, LOG_FATAL };
 
 /** @brief success return 0 **/
 int open_log(const char* logfile, int level);

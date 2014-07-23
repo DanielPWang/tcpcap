@@ -1,6 +1,6 @@
 TARGET = eru_agent
 OUTDIR = build/
-CC = /home/daniel/gcc447/bin/gcc 
+CC = /home/daniel/gcc447/bin/gcc -pg
 
 ifdef RELEASE
 	CFLAGS = -Wall -O3 -fomit-frame-pointer -march=prescott

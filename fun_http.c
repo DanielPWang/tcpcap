@@ -127,8 +127,8 @@ struct http_session* sm_AddSession(struct http_session* session)
 }
 struct http_session* sm_DelSession(struct http_session* session)
 {
+	if (session->create.tv_sec == 32054) _debug_points();
 	uint16_t index = (session->client.port)&1023u;
-	LOGDEBUG("FindSession: %08X, %d, %d", session->client.ip.s_addr, session->client.port, index);
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	if (session->prev) {
 		session->prev->next = session->next;
@@ -227,6 +227,8 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 }
 void AppendPacketToHttpSession(struct http_session* session, void *packet)
 {
+	if (session->create.tv_sec == 32054) _debug_points();
+
 	INC_APPEND_PACKET;
 	++session->packet_num;
 	struct timeval tv = *(struct timeval*)packet;
@@ -272,11 +274,13 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 }
 void FinishHttpSession(struct http_session* session, int flag)
 {
-	session->flag = flag;
+	if (session->flag==HTTP_SESSION_NEW) INC_FINISH_SESSION;
+
 	// if flag == FINISH or RESET or WAITONESEC
-	if (flag==HTTP_SESSION_FINISH || flag==HTTP_SESSION_RESET) {
+	if (flag==HTTP_SESSION_FINISH || flag==HTTP_SESSION_RESET ) {
 		sm_DelSession(session);
 	}
+	session->flag = flag;
 }
 struct http_session* FindHttpSession(const struct iphdr* ip, const struct tcphdr* tcp)
 {
@@ -360,6 +364,7 @@ int _cmp_packet_(void* l, void* r)
 			}
 		}
 	} else {
+		if (ltcp->seq==rtcp->ack_seq) return -1;
 		uint32_t seq = ltcp->seq+ltcp->window;
 		if (seq == rtcp->ack_seq) return -1;
 		if (seq > rtcp->ack_seq) {
@@ -437,36 +442,41 @@ void *_process_timeout(void* p)
 		struct http_session* prev = NULL;
 		count = 0;
 		while (cur)	{
-			if (cur->create.tv_sec == 32054) { _debug_points(); }
 			++count;
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
 					|| cur->flag==HTTP_SESSION_REUSED) {
 				_del_session_from_working_next(prev, cur);
+				if (cur->create.tv_sec==32054) { _debug_points(); }
 				_fix_packet_order(&cur->data);
 				push_queue(_whole_content, cur);
-				cur = prev? prev->_work_next:NULL;
+				cur = prev? prev->_work_next:_http_session_head;
 				continue;
 			} 
-			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
-				LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
-						index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
-				cur->flag = HTTP_SESSION_TIMEOUT;
-				sm_DelSession(cur);
-				_del_session_from_working_next(prev, cur);
-				_fix_packet_order(&cur->data);
-				push_queue(_whole_content, cur);
-				cur = prev? prev->_work_next:NULL;
-				continue;
-			}
 			if (cur->flag==HTTP_SESSION_WAITONESEC && _http_active-cur->update.tv_sec > broken_time) {
 					LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
+				if (cur->create.tv_sec==32054) { _debug_points(); }
 				_fix_packet_order(&cur->data);
 				push_queue(_whole_content, cur);
-				cur = prev? prev->_work_next:NULL;
+				cur = prev? prev->_work_next:_http_session_head;
+				continue;
+			}
+			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
+				LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
+						index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
+				cur->flag = HTTP_SESSION_TIMEOUT;
+				sm_DelSession(cur);
+				_del_session_from_working_next(prev, cur);
+				if (cur->create.tv_sec==32054) { _debug_points(); }
+				//if (cur->http || cur->query) 
+				{
+					_fix_packet_order(&cur->data);
+				}
+				push_queue(_whole_content, cur);
+				cur = prev? prev->_work_next:_http_session_head;
 				continue;
 			}
 			prev = cur;
@@ -511,7 +521,7 @@ void *HTTP_Thread(void* param)
 		tcphead->source = ntohs(tcphead->source);
 		tcphead->dest = ntohs(tcphead->dest);
 
-		if (*(int*)packet == 32054) {_debug_points(); }
+		// if (*(int*)packet == 32054) {_debug_points(); }
 
 		struct http_session* session = FindHttpSession(iphead, tcphead);
 		if (FLOW_GET(tcphead)==C2S) {
@@ -597,7 +607,7 @@ int HttpStop()
 {
 	while (DEBUG) {	// TODO: I want to process all packets.
 		if (len_queue(_packets)==0 && len_queue(_whole_content)==0 && _http_session_head==NULL) break;
-		_http_active += g_nHttpTimeout/20;
+		_http_active += g_nHttpTimeout/5;
 		sleep(1);
 	}
 	_http_living = 0;

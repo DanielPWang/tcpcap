@@ -21,6 +21,7 @@ uint32_t packet_num = 0u;
 uint32_t session_count = 0u;
 uint32_t append_packet_count = 0u;
 uint32_t whole_queue_count = 0u;
+uint32_t finish_session_count = 0u;
 
 #define P(x) printf("\t" #x " = %u\n", x)
 void PrintStatis()
@@ -30,6 +31,7 @@ void PrintStatis()
 	P(packets_pop);
 	P(get_post_count);
 	P(new_http_session);
+	P(finish_session_count);
 	P(http_image);
 	P(sent_count);
 	P(session_count);
@@ -41,15 +43,16 @@ void PrintStatis()
 }
 void PrintTitle()
 {
-	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tGETPOST\tNEWSESSION\tAPPEND\tHTTPIMAGE\tSEND\tACTSESSION\tWHOLE\tWHOLES\tDROPPKT\n");
+	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tGETPOST\tNEWSESSION\tFINISHSESSION\tAPPEND\tHTTPIMAGE\tSEND\tACTSESSION\tWHOLE\tWHOLES\tDROPPKT\n");
 }
 void PrintStati()
 {
 	time_t now = time(NULL);
 	char stime[64];
 	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
-	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
-			packets_pop, get_post_count, new_http_session, append_packet_count,
+	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
+			packets_pop, get_post_count, new_http_session, finish_session_count,
+			append_packet_count,
 			http_image, sent_count, session_count,
 			whole_html_session, whole_queue_count, drop_packet_count);
 }
