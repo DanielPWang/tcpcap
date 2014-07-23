@@ -27,7 +27,7 @@
 
 
 // TODO: mutil thread to process http
-static pthread_t _http_thread_id[HTTP_PROCESS_THREADS];
+static pthread_t _http_thread_id;
 
 static void* _valid_hosts = NULL;
 pthread_mutex_t _host_ip_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -224,6 +224,7 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 }
 void AppendPacketToHttpSession(struct http_session* session, void *packet)
 {
+	INC_APPEND_PACKET;
 	++session->packet_num;
 	struct timeval tv = *(struct timeval*)packet;
 	char sip[18], dip[18];
@@ -329,6 +330,44 @@ void _show_working_session()
 		printf("%p ", cur);
 		cur = cur->_work_next;
 	}
+}
+void _swap_cur_next_list(void* prev, void* cur, void* next)
+{
+	if (prev) {
+		*(void**)prev = next;
+	}
+	*(void**)cur = *(void**)next;
+	*(void**)next = cur;
+}
+int _cmp_packet_(void* l, void* r)
+{
+	struct iphdr* lip = IPHDR(l);
+	struct iphdr* rip = IPHDR(r);
+	struct tcphdr* ltcp = TCPHDR(lip);
+	struct tcphdr* rtcp = TCPHDR(rip);
+	if (FLOW_GET(ltcp) == FLOW_GET(rtcp)) {
+		if (ltcp->seq == rtcp->seq) return 0;
+		if (ltcp->seq > rtcp->seq) {
+			//if (
+		}
+	} else {
+	}
+	return 0;
+}
+// return lost bytes
+int _fix_packet_order(void** data)
+{
+	struct iphdr* prev_ip, cur_ip, next_ip;
+	struct tcphdr* prev_tcp, cur_tcp, next_tcp;
+	int lost = 0;
+	int change = 0;
+	void* head = *data;
+	void* packet = head;
+	void* prev = NULL;
+	void* next = NULL;
+	while (packet) {
+	}
+	return lost;
 }
 void *_process_timeout(void* p)
 {
@@ -507,9 +546,7 @@ int HttpStop()
 	}
 	_http_living = 0;
 	void *retvl = NULL;
-	for (int n=0; n<HTTP_PROCESS_THREADS; ++n) {
-		int err = pthread_join(_http_thread_id[n], &retvl);
-	}
+	int err = pthread_join(_http_thread_id, &retvl);
 	return 0;
 }
 
@@ -539,19 +576,11 @@ int HttpInit()
 
 	sm_Init();
 
-	pthread_attr_t pattr;
-	struct sched_param par = { sched_get_priority_max(SCHED_FIFO) };
-	ASSERT(pthread_attr_init(&pattr) == 0);
-	ASSERT(pthread_attr_setschedpolicy(&pattr, SCHED_FIFO) == 0);
-	ASSERT(pthread_attr_setschedparam(&pattr, &par) == 0);
-	for (int n=0; n<HTTP_PROCESS_THREADS; ++n) {
-		int err = pthread_create(&_http_thread_id[n], &pattr, &HTTP_Thread, (void*)&_http_living);
-		ASSERT(err >= 0);
-	}
-	pthread_attr_destroy(&pattr);
+	int err = pthread_create(&_http_thread_id, NULL, &HTTP_Thread, (void*)&_http_living);
+	ASSERT(err >= 0);
 
 	pthread_t thread_timeout_id;
-	int err = pthread_create(&thread_timeout_id, NULL, &_process_timeout, NULL);
+	err = pthread_create(&thread_timeout_id, NULL, &_process_timeout, NULL);
 	ASSERT(err==0);
 
 	return _packets==NULL? -1:0;

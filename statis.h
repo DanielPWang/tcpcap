@@ -13,6 +13,7 @@ extern uint32_t new_http_session;
 extern uint32_t http_image;
 extern uint32_t packet_num;
 extern uint32_t session_count;
+extern uint32_t append_packet_count;
 
 #define INC_TOTAL_PCAP do{ ++total_pcap; }while(0)
 #define INC_PUSH_PACKETS do{ ++ packets_pushed; }while(0)
@@ -24,6 +25,7 @@ extern uint32_t session_count;
 #define INC_HTTP_IMAGE do { ++http_image; } while(0)
 #define INC_DROP_HTTP_IMAGE do { ++drop_http_image; } while(0)
 #define INC_NEW_HTTP_SESSION do { ++new_http_session; } while(0)
+#define INC_APPEND_PACKET do { ++append_packet_count; } while(0)
 #define SET_ACTIVE_SESSION_COUNT(x) (session_count = (x))
 
 void PrintStatis();
