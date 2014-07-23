@@ -105,7 +105,10 @@ uint32_t _check_http_or_query(const void* content)
 	}
 	return HTTP_QUERY_NONE;
 }
-
+int _debug_points()
+{
+	return 0;
+}
 //////////////////////////////// sessions_group funtions
 #define IMAGE1024 1024
 struct http_session* sm_AddSession(struct http_session* session)
@@ -434,6 +437,7 @@ void *_process_timeout(void* p)
 		struct http_session* prev = NULL;
 		count = 0;
 		while (cur)	{
+			if (cur->create.tv_sec == 32054) { _debug_points(); }
 			++count;
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
 					|| cur->flag==HTTP_SESSION_REUSED) {
@@ -470,6 +474,7 @@ void *_process_timeout(void* p)
 		}
 		end = time(NULL);
 		SET_ACTIVE_SESSION_COUNT(count);
+		SET_WHOLE_QUEUE_COUNT(len_queue(_whole_content));
 	}
 	return NULL;
 }
@@ -506,9 +511,7 @@ void *HTTP_Thread(void* param)
 		tcphead->source = ntohs(tcphead->source);
 		tcphead->dest = ntohs(tcphead->dest);
 
-		if (*(int*)packet == 1902) {
-			LOGERROR0("DEBUG...");
-		}
+		if (*(int*)packet == 32054) {_debug_points(); }
 
 		struct http_session* session = FindHttpSession(iphead, tcphead);
 		if (FLOW_GET(tcphead)==C2S) {
@@ -534,7 +537,7 @@ void *HTTP_Thread(void* param)
 			} 
 NEWSESSION0:
 			if (contentlen == 0) {
-				free(packet);
+				free(packet); INC_APPEND_PACKET;
 				continue;
 			}
 			session = NewHttpSession();
@@ -553,7 +556,7 @@ NEWSESSION0:
 					if (contentlen>0) {
 						AppendPacketToHttpSession(session, packet);
 					} else {
-						free(packet);
+						free(packet); INC_APPEND_PACKET;
 					}
 					FinishHttpSession(session, HTTP_SESSION_RESET);
 					continue;
@@ -561,7 +564,7 @@ NEWSESSION0:
 					if (contentlen>0) {
 						AppendPacketToHttpSession(session, packet);
 					} else {
-						free(packet);
+						free(packet); INC_APPEND_PACKET;
 					}
 					FinishHttpSession(session, HTTP_SESSION_WAITONESEC);
 					continue;
@@ -593,7 +596,7 @@ NEWSESSION0:
 int HttpStop()
 {
 	while (DEBUG) {	// TODO: I want to process all packets.
-		if (len_queue(_packets)==0 && len_queue(_whole_content)==0) break;
+		if (len_queue(_packets)==0 && len_queue(_whole_content)==0 && _http_session_head==NULL) break;
 		_http_active += g_nHttpTimeout/20;
 		sleep(1);
 	}
