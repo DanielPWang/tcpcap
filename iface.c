@@ -156,15 +156,23 @@ int CapturePacket(char* buffer, size_t size)
 	assert(_epollfd > 0);
 	assert(_active_sock > 0);
 
-	int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
-	if (nfds < 1 ) return 0;	// test exit.
+	int nRecv = 0;
+	if (_active_sock == 1) {
+		struct sockaddr_in sa;
+		socklen_t salen = sizeof(sa);
 
-	struct sockaddr_in sa;
-	socklen_t salen = sizeof(sa);
+		nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
+		if (nRecv == -1) { nRecv = 0; }
+	} else {
+		int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
+		if (nfds < 1 ) return 0;	// test exit.
 
-	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
-	if (nRecv == -1) { return 0; }
+		struct sockaddr_in sa;
+		socklen_t salen = sizeof(sa);
 
+		int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
+		if (nRecv == -1) { nRecv=0; }
+	}
 	return nRecv;
 }
 
