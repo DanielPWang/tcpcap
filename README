@@ -27,3 +27,63 @@ Exit http thread.
         drop_http_image = 0
         append_packet_count = 92830
         whole_queue_count = 0
+/////////////////////////////////////////////////////////////////////////////////
+Version 1.0.8 (9) Copyright(C)2012
+TIME    CAP     PKTSIN  PKTSOUT GETPOST NEWSESSION FINISHSESSION      APPEND    HTTPIMAGE       SEND    ACTSESSION       WHOLE   WHOLES  DROPPKT
+2014-07-23 18:20:33|26  14      0       0       0  0    0     0 0     0 0       0       0
+2014-07-23 18:20:38|346630      215876  215876  0  1536 750   16103   0 0       15      1529    5       198237
+2014-07-23 18:20:43|618708      386561  386561  0  2568 1283  22029   0 0       21      2551    17      361964
+2014-07-23 18:20:48|990894      619013  617395  0  4474 2193  34327   0 0       21      4464    17      578594
+2014-07-23 18:20:53|1281936     798438  796795  0  5742 2781  47515   0 0       39      5705    23      743538
+2014-07-23 18:20:58|1528307     951280  950546  0  7064 3346  59625   0 0       28      6993    0       883857
+2014-07-23 18:21:03|1699645     1057191 1057191 0  8091 3879  67170   0 0       58      8063    28      981930
+2014-07-23 18:21:08|1951247     1213844 1213810 0  9592 4647  78885   0 0       38      9565    0       1125333
+2014-07-23 18:21:13|2237010     1391337 1391337 0  11346      5550    92413     0       0       30      11336   2
+        1287578
+2014-07-23 18:21:18|2239018     1392589 1392589 0  11358      5556    92516     0       0       1       11357   0
+        1288715
+Exit http thread.
+        total_pcap = 2239018
+        packets_pushed = 1392589
+        packets_pop = 1392589
+        get_post_count = 0
+        new_http_session = 11358
+        finish_session_count = 5556
+        http_image = 0
+        sent_count = 0
+        session_count = 0
+        whole_html_session = 11358
+        drop_packet_count = 1288715
+        drop_http_image = 0
+        append_packet_count = 92516
+        whole_queue_count = 0
+
+real    0m50.117s
+user    0m51.440s
+sys     0m36.719s
+////////////////////////////////////////////////////////////////////////////////////
+daniel@Ben-DEV ~daniel/Agent/agent# time ./eru_agent -r /dev/shm/fudan_sch.pcap
+Version 1.0.8 (9) Copyright(C)2012
+TIME CAP PKTSIN PKTSOUT GETPOST NEWSESSION FINISHSESSION APPEND HTTPIMAGE SEND ACTSESSION WHOLE WHOLES DROPPKT
+2014-07-23 19:59:36|15 5 1 0 0 0  0 0 0 0 0 0 0
+2014-07-23 19:59:41|1000606 625094  582071 0  3960 3399 38576  0 0 746 3351 84 539535
+2014-07-23 19:59:46|2031927 1263845 1217934 0 9009 8388 99781  0 0 715 8367 53 1109144
+2014-07-23 19:59:51|2239018 1392593 1392593 0 10611  9948 118201 0 0 648 9963 0 1263781
+Exit http thread.
+2014-07-23 19:59:56|2239018 1392593 1392593 0 10611  9948 118201 0 0 0 10611  0 1263781
+ total_pcap = 2239018
+ packets_pushed = 1392593
+ packets_pop = 1392593
+ get_post_count = 0
+ new_http_session = 10611
+ finish_session_count = 9948
+ http_image = 0
+ sent_count = 0
+ session_count = 0
+ whole_html_session = 10611
+ drop_packet_count = 1263781
+ drop_http_image = 0
+ append_packet_count = 118201
+ whole_queue_count = 0
+./eru_agent -r /dev/shm/fudan_sch.pcap  39.97s user 4.61s system 177% cpu 25.061 total
+
