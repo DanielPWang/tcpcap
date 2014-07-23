@@ -335,6 +335,8 @@ void _show_working_session()
 int _cmp_packet_(void* l, void* r)
 {
 	assert(l!=r);
+	if (l==NULL) return -1;
+	if (r==NULL) return -1;
 	struct iphdr* lip = IPHDR(l);
 	struct iphdr* rip = IPHDR(r);
 	struct tcphdr* ltcp = TCPHDR(lip);
@@ -356,7 +358,7 @@ int _cmp_packet_(void* l, void* r)
 		}
 	} else {
 		uint32_t seq = ltcp->seq+ltcp->window;
-		if (seq == rtcp->ack_seq) return 1;
+		if (seq == rtcp->ack_seq) return -1;
 		if (seq > rtcp->ack_seq) {
 			if (seq-rtcp->ack_seq < 0x000FFFFF) {
 				return 1;
