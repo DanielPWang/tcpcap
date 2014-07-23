@@ -1,0 +1,29 @@
+[daniel@guanghua101 agent]$ ./agent -r ../../fudan.pcap
+Version 1.0.8 (9) Copyright(C)2012
+TIME    CAP     PKTSIN  PKTSOUT GETPOST NEWSESSION FINISHSESSION      APPEND    HTTPIMAGE       SEND    ACTSESSION       WHOLE   WHOLES  DROPPKT
+2014-07-23 17:37:12|192 173     99      0       1  0    1     0 0     0 0       0       97
+2014-07-23 17:37:17|572102      357474  307697  0  2112 1072  19477   0 0       58      2086    0       286108
+2014-07-23 17:37:22|949986      593681  593506  0  4266 2142  33312   0 0       72      4201    1       555928
+2014-07-23 17:37:27|1243743     775149  774869  0  5590 2769  47127   0 0       27      5559    1       722152
+2014-07-23 17:37:32|1489589     927537  927537  0  6797 3289  58080   0 0       26      6768    2       862660
+2014-07-23 17:37:37|1674431     1041642 1041455 0  7951 3801  65771   0 0       28      7921    3       967733
+2014-07-23 17:37:42|1965761     1222897 1222726 0  9684 4686  79451   0 0       34      9639    1       1133591
+2014-07-23 17:37:47|2239018     1392593 1392593 0  11366      5567    92830     0       0       10      11356   0
+        1288397
+2014-07-23 17:37:52|2239018     1392593 1392593 0  11366      5567    92830     0       0       0       11366   0
+        1288397
+Exit http thread.
+        total_pcap = 2239018
+        packets_pushed = 1392593
+        packets_pop = 1392593
+        get_post_count = 0
+        new_http_session = 11366
+        finish_session_count = 5567
+        http_image = 0
+        sent_count = 0
+        session_count = 0
+        whole_html_session = 11366
+        drop_packet_count = 1288397
+        drop_http_image = 0
+        append_packet_count = 92830
+        whole_queue_count = 0
