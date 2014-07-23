@@ -127,7 +127,6 @@ struct http_session* sm_AddSession(struct http_session* session)
 }
 struct http_session* sm_DelSession(struct http_session* session)
 {
-	if (session->create.tv_sec == 32054) _debug_points();
 	uint16_t index = (session->client.port)&1023u;
 	pthread_mutex_lock(&_sessions_group[index].lock);
 	if (session->prev) {
@@ -227,8 +226,6 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 }
 void AppendPacketToHttpSession(struct http_session* session, void *packet)
 {
-	if (session->create.tv_sec == 32054) _debug_points();
-
 	INC_APPEND_PACKET;
 	++session->packet_num;
 	struct timeval tv = *(struct timeval*)packet;
@@ -446,7 +443,6 @@ void *_process_timeout(void* p)
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
 					|| cur->flag==HTTP_SESSION_REUSED) {
 				_del_session_from_working_next(prev, cur);
-				if (cur->create.tv_sec==32054) { _debug_points(); }
 				_fix_packet_order(&cur->data);
 				push_queue(_whole_content, cur);
 				cur = prev? prev->_work_next:_http_session_head;
@@ -458,7 +454,6 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				if (cur->create.tv_sec==32054) { _debug_points(); }
 				_fix_packet_order(&cur->data);
 				push_queue(_whole_content, cur);
 				cur = prev? prev->_work_next:_http_session_head;
@@ -470,7 +465,6 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				if (cur->create.tv_sec==32054) { _debug_points(); }
 				//if (cur->http || cur->query) 
 				{
 					_fix_packet_order(&cur->data);
