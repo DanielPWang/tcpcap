@@ -185,8 +185,8 @@ struct http_session* InitHttpSession(struct http_session* session, void *packet)
 	session->server.ip.s_addr = ip->daddr; 
 	session->server.port = tcp->dest;
 	session->flag   = HTTP_SESSION_NEW;
-	//session->seq	= tcp->seq+contentlen;
-	// session->ack	= tcp->ack_seq;
+	session->seq	= tcp->seq+contentlen;
+	session->ack	= tcp->ack_seq;
 	session->content_type= HTTP_CONTENT_NONE;
 	session->create	= tv;
 	session->update = tv;
@@ -331,16 +331,10 @@ void _show_working_session()
 		cur = cur->_work_next;
 	}
 }
-void _swap_cur_next_list(void* prev, void* cur, void* next)
-{
-	if (prev) {
-		*(void**)prev = next;
-	}
-	*(void**)cur = *(void**)next;
-	*(void**)next = cur;
-}
+// return l>r:1; l=r:0; l<r:-1
 int _cmp_packet_(void* l, void* r)
 {
+	assert(l!=r);
 	struct iphdr* lip = IPHDR(l);
 	struct iphdr* rip = IPHDR(r);
 	struct tcphdr* ltcp = TCPHDR(lip);
@@ -348,25 +342,78 @@ int _cmp_packet_(void* l, void* r)
 	if (FLOW_GET(ltcp) == FLOW_GET(rtcp)) {
 		if (ltcp->seq == rtcp->seq) return 0;
 		if (ltcp->seq > rtcp->seq) {
-			//if (
+			if (ltcp->seq-rtcp->seq < 0x000FFFFF) {
+				return 1;
+			} else {
+				return -1;
+			}
+		} else {
+			if (rtcp->seq-ltcp->seq < 0x000FFFFF) {
+				return -1;
+			} else {
+				return 1;
+			}
 		}
 	} else {
+		uint32_t seq = ltcp->seq+ltcp->window;
+		if (seq == rtcp->ack_seq) return 1;
+		if (seq > rtcp->ack_seq) {
+			if (seq-rtcp->ack_seq < 0x000FFFFF) {
+				return 1;
+			} else {
+				return -1;
+			}
+		} else {
+			if (rtcp->ack_seq-seq < 0x000FFFFF) {
+				return -1;
+			} else {
+				return 1;
+			}
+		}
 	}
+	assert(0);
 	return 0;
 }
 // return lost bytes
 int _fix_packet_order(void** data)
 {
-	struct iphdr* prev_ip, cur_ip, next_ip;
-	struct tcphdr* prev_tcp, cur_tcp, next_tcp;
 	int lost = 0;
 	int change = 0;
-	void* head = *data;
-	void* packet = head;
-	void* prev = NULL;
-	void* next = NULL;
-	while (packet) {
-	}
+	do {
+		change = 0;
+		void* head = *data;
+		void* packet = head;
+		void* prev = NULL;
+		void* next = NULL;
+		while (packet) {
+			next = *(void**)packet;
+			int cmp = _cmp_packet_(packet, next); 
+			if (cmp == 0) {
+				if (prev) {
+					*(void**)prev = next;
+				} else {
+					*data = next;
+				}
+				free(packet);
+				packet = *(void**)next;
+				prev = next;
+				continue;
+			}
+			if (cmp < 0) {
+				prev = packet;
+				packet = next;
+				continue;
+			}
+			if (prev) {
+				*(void**)prev = next;
+			} else {
+				*data = next;
+			}
+			*(void**)packet = *(void**)next;
+			*(void**)next = packet;
+			++change;
+		}
+	} while (change);
 	return lost;
 }
 void *_process_timeout(void* p)
@@ -389,6 +436,7 @@ void *_process_timeout(void* p)
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
 					|| cur->flag==HTTP_SESSION_REUSED) {
 				_del_session_from_working_next(prev, cur);
+				_fix_packet_order(&cur->data);
 				push_queue(_whole_content, cur);
 				cur = prev? prev->_work_next:NULL;
 				continue;
@@ -399,6 +447,7 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
+				_fix_packet_order(&cur->data);
 				push_queue(_whole_content, cur);
 				cur = prev? prev->_work_next:NULL;
 				continue;
@@ -409,6 +458,8 @@ void *_process_timeout(void* p)
 				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
+				_fix_packet_order(&cur->data);
+				push_queue(_whole_content, cur);
 				cur = prev? prev->_work_next:NULL;
 				continue;
 			}
