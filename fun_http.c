@@ -235,8 +235,8 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 		free(packet);
 	} else {
 		*(void**)packet = NULL;
-		*(void**)session->lastdata = packet;
 		session->lastdata = packet;
+		*(void**)session->lastdata = packet;
 		// > 20M
 		if (session->content_type==HTTP_CONTENT_NONE && session->packet_num>2000) {
 			session->content_type=HTTP_CONTENT_STREAM;
@@ -425,7 +425,7 @@ int _fix_packet_order(void** data)
 }
 void *_process_timeout(void* p)
 {
-	int broken_time = 1;
+	int broken_time = 2;
 	if (DEBUG) broken_time = 10000;
 	time_t start, end;
 	start = end = time(NULL);
@@ -680,6 +680,9 @@ int FilterPacketForHttp(char* buffer, struct iphdr* iphead, struct tcphdr* tcphe
 	} 
 	CONTENT_LEN_SET(tcphd, contentlen);
 
+	struct timeval *tv = (struct timeval*)buffer;
+	if (DEBUG) { } else { gettimeofday(tv, NULL); }
+
 	struct hosts_t host = { {iphead->saddr}, tcphead->source };
 	struct hosts_t host1 = { {iphead->daddr}, tcphead->dest};
 	pthread_mutex_lock(&_host_ip_lock);
@@ -693,10 +696,7 @@ int FilterPacketForHttp(char* buffer, struct iphdr* iphead, struct tcphdr* tcphe
 	}
 	pthread_mutex_unlock(&_host_ip_lock);
 
-	if (nRs >= 0) {
-		struct timeval *tv = (struct timeval*)buffer;
-		if (!DEBUG) gettimeofday(tv, NULL);
-	} else {
+	if (nRs < 0) {
 		char ssip[16], sdip[16];
 		LOGDEBUG("%s:%u => %s:%u is skiped.", 
 				inet_ntop(AF_INET, &iphead->saddr, ssip, 16), ntohs(tcphead->source),

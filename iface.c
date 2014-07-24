@@ -161,7 +161,7 @@ int CapturePacket(char* buffer, size_t size)
 		struct sockaddr_in sa;
 		socklen_t salen = sizeof(sa);
 
-		nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
+		nRecv = recvfrom(SockMonitor[0], buffer, size, 0, (struct sockaddr*)&sa, &salen);
 		if (nRecv == -1) { nRecv = 0; }
 	} else {
 		int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
