@@ -109,6 +109,23 @@ int _debug_points()
 {
 	return 0;
 }
+int _check_heads(const char* content, size_t len, const char* name, struct _type_content_t* types, size_t tynum)
+{
+	const char* start = strcasestr(content, name);
+	const char* stop = strchr(start, '\r');
+	int namelen = strlen(name);
+	if (start==NULL || stop==NULL || namelen==0) return HTTP_CONTENT_NONE;
+	start += namelen;
+	namelen = stop-start;
+	if (namelen<=0) return HTTP_CONTENT_NONE;
+	for (int n=0; n<tynum; ++n) {
+		if (memmem(start, namelen, types[n].content, types[n].len)) {
+			return types[n].type;
+		}
+	}
+
+	return HTTP_CONTENT_NONE;
+}
 //////////////////////////////// sessions_group funtions
 #define IMAGE1024 1024
 struct http_session* sm_AddSession(struct http_session* session)
@@ -462,14 +479,16 @@ void *_process_timeout(void* p)
 			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
 				LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 						index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
-				cur->flag = HTTP_SESSION_TIMEOUT;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				//if (cur->http || cur->query) 
-				{
+				if (cur->http || cur->query) {
+					cur->flag = HTTP_SESSION_TIMEOUT;
 					_fix_packet_order(&cur->data);
+					push_queue(_whole_content, cur);
+				} else {
+					CleanHttpSession(cur);
+					INC_DROP_SESSION_ONQUERY_NOHTTP;
 				}
-				push_queue(_whole_content, cur);
 				cur = prev? prev->_work_next:_http_session_head;
 				continue;
 			}

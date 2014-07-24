@@ -169,6 +169,7 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+	ShowStati();
 	// ProfilerFlush();
 	LOGINFO0("ready to exit...");
 	HttpStop();

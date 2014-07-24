@@ -16,6 +16,7 @@ extern uint32_t session_count;
 extern uint32_t whole_queue_count;
 extern uint32_t append_packet_count;
 extern uint32_t finish_session_count;
+extern uint32_t drop_noquery_nohttp;
 
 #define INC_TOTAL_PCAP do{ ++total_pcap; }while(0)
 #define INC_PUSH_PACKETS do{ ++ packets_pushed; }while(0)
@@ -29,6 +30,7 @@ extern uint32_t finish_session_count;
 #define INC_NEW_HTTP_SESSION do { ++new_http_session; } while(0)
 #define INC_APPEND_PACKET do { ++append_packet_count; } while(0)
 #define INC_FINISH_SESSION do { ++finish_session_count; } while(0)
+#define INC_DROP_SESSION_ONQUERY_NOHTTP do { ++drop_noquery_nohttp; } while(0)
 #define SET_ACTIVE_SESSION_COUNT(x) (session_count = (x))
 #define SET_WHOLE_QUEUE_COUNT(x) (whole_queue_count = (x))
 

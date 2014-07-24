@@ -33,6 +33,7 @@ int open_monitor(const char* interface, const char* fliter)
 {
 	char* errbuff = (char*)malloc(PCAP_ERRBUF_SIZE);
 	pcap_t *p = pcap_open_live(interface, RECV_BUFFER_LEN, 1, 0, errbuff);
+	pcap_live[_active_sock] = p;
 	if (p == NULL) {
 		LOGFATAL("Cannt open %s [%s]", interface, errbuff);
 		abort();
@@ -104,11 +105,13 @@ int OpenMonitorDevs()
 	char *left = value;
 	char *right = NULL;
 
+	struct timeval timeout = { 5, 0 };
 	for (; _active_sock<=MONITOR_COUNT ; left=NULL)
 	{
 		left = strtok_r(left, " ", &right);
 		if (left == NULL) break;
 		SockMonitor[_active_sock] = open_monitor(left, "");
+		setsockopt(SockMonitor[_active_sock], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 		if (SockMonitor[_active_sock] > 0) {
 			LOGINFO("open interface %s", left);
 			ev.events = EPOLLIN;
@@ -187,3 +190,10 @@ void CloseOpenMonitorDevs()
 	_epollfd = 0;
 }
 
+void ShowStati()
+{
+	if (!DEBUG) return ;
+	struct pcap_stat stat;
+	pcap_stats(pcap_live[0], &stat);
+	printf("%d %d %d\n", stat.ps_drop, stat.ps_ifdrop, stat.ps_recv);
+}

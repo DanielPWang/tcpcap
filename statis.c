@@ -22,6 +22,7 @@ uint32_t session_count = 0u;
 uint32_t append_packet_count = 0u;
 uint32_t whole_queue_count = 0u;
 uint32_t finish_session_count = 0u;
+uint32_t drop_noquery_nohttp = 0u;
 
 #define P(x) printf("\t" #x " = %u\n", x)
 void PrintStatis()
@@ -40,21 +41,22 @@ void PrintStatis()
 	P(drop_http_image);
 	P(append_packet_count);
 	P(whole_queue_count);
+	P(drop_noquery_nohttp);
 }
 void PrintTitle()
 {
-	printf("TIME\tCAP\tPKTSIN\tPKTSOUT\tGETPOST\tNEWSESSION\tFINISHSESSION\tAPPEND\tHTTPIMAGE\tSEND\tACTSESSION\tWHOLE\tWHOLES\tDROPPKT\n");
+	printf("TIME CAP PKTSIN PKTSOUT GETPOST NEWSESSION FINISHSESSION APPEND HTTPIMAGE SEND ACTSESSION WHOLE WHOLES DROPPKT DROPSESSIONNOHTTPQUERYn");
 }
 void PrintStati()
 {
 	time_t now = time(NULL);
 	char stime[64];
 	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
-	printf("%s|%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t%u\t\n", stime, total_pcap, packets_pushed, 
+	printf("%s|%u %u %u %u %u %u %u %u %u %u %u %u %u %u\n", stime, total_pcap, packets_pushed, 
 			packets_pop, get_post_count, new_http_session, finish_session_count,
 			append_packet_count,
 			http_image, sent_count, session_count,
-			whole_html_session, whole_queue_count, drop_packet_count);
+			whole_html_session, whole_queue_count, drop_packet_count, drop_noquery_nohttp);
 }
 void* _show_statis_thread(void* p)
 {
