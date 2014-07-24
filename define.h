@@ -18,7 +18,7 @@ extern const char* CONFIG_PATH;
 extern int DEBUG;
 
 // capture
-#define RECV_BUFFER_LEN   1600 // 8192
+#define RECV_BUFFER_LEN   2400 // 8192
 
 #define MAX_BLOCK_ITEM 500
 // HTTP

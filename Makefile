@@ -5,7 +5,7 @@ CC = /home/daniel/gcc447/bin/gcc
 ifdef RELEASE
 	CFLAGS = -Wall -O3 -fomit-frame-pointer -march=prescott
 else
-	CFLAGS = -ggdb -O0 
+	CFLAGS = -ggdb -O0 -pg
 endif
 
 # CFLAGS += -fPIC -march=pentium4 -DVER_SVNID=$(shell svn info | sed -n '/Revision/p' | awk '{ print $$2; }')  -std=gnu99

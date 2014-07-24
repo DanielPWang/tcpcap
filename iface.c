@@ -32,7 +32,7 @@ extern volatile int Living;
 int open_monitor(const char* interface, const char* fliter)
 {
 	char* errbuff = (char*)malloc(PCAP_ERRBUF_SIZE);
-	pcap_t *p = pcap_open_live(interface, 65535, 1, 0, errbuff);
+	pcap_t *p = pcap_open_live(interface, RECV_BUFFER_LEN, 1, 0, errbuff);
 	if (p == NULL) {
 		LOGFATAL("Cannt open %s [%s]", interface, errbuff);
 		abort();
