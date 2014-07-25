@@ -148,7 +148,7 @@ int main(int argc, char* argv[])
 		if (nrecv == 0) continue;
 
 		INC_TOTAL_PCAP;
-		FRAME_NUM_SET(buffer);
+		if (DEBUG) { FRAME_NUM_SET(buffer); }
 
 		struct ether_header *ehead = (struct ether_header*)buffer;
 		u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
@@ -161,6 +161,7 @@ int main(int argc, char* argv[])
 
 			if (iphead->protocol == IPPROTO_TCP) {
 				struct tcphdr *tcphead = TCPHDR(iphead);
+				if (DEBUG) { tcphead->urg_ptr = packet_num; }
 
 				// Http filter.
 				if (FilterPacketForHttp(buffer, iphead, tcphead) >= 0) {

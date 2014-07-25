@@ -278,8 +278,19 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 	INC_APPEND_PACKET;
 	++session->packet_num;
 	struct timeval tv = *(struct timeval*)packet;
+	struct iphdr* ip = IPHDR(packet);
+	struct tcphdr* tcp = TCPHDR(ip);
+	char* content = CONTENT_GET(tcp);
 	char sip[18], dip[18];
 	session->update = tv;
+
+	if (FLOW_GET(tcp) == S2C) {
+		if (session->seq<tcp->ack_seq) session->seq = tcp->ack_seq;
+		if (session->ack<tcp->seq+tcp->window) session->ack = tcp->seq+tcp->window;
+	} else {
+		if (session->seq<tcp->seq+tcp->window) session->seq = tcp->seq+tcp->window;
+		if (session->ack<tcp->ack_seq) session->ack = tcp->ack_seq;
+	}
 	if (session->content_type>=HTTP_CONTENT_FILE) { //HTTP_CONTENT_STREAM) {
 		free(packet);
 	} else {
@@ -287,13 +298,9 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 		*(void**)session->lastdata = packet;
 		session->lastdata = packet;
 		// > 20M
-		if (session->content_type==HTTP_CONTENT_NONE && session->packet_num>2000) {
-			session->content_type=HTTP_CONTENT_STREAM;
-		}
+		if (session->http==NULL && session->packet_num>10) { session->content_type=HTTP_CONTENT_STREAM; }
+
 		if (session->query_image == HTTP_QUERY_NONE) {
-			struct iphdr* ip = IPHDR(packet);
-			struct tcphdr* tcp = TCPHDR(ip);
-			char* content = CONTENT_GET(tcp);
 			session->query_image = _check_http_or_query(content);
 			if (session->query_image==HTTP_QUERY_GET_POST
 					|| session->query_image==HTTP_QUERY_OTHER) {
@@ -305,9 +312,6 @@ void AppendPacketToHttpSession(struct http_session* session, void *packet)
 			}
 		}
 		if (session->http == NULL) {
-			struct iphdr* ip = IPHDR(packet);
-			struct tcphdr* tcp = TCPHDR(ip);
-			char* content = CONTENT_GET(tcp);
 			if (*(uint32_t*)content == _http_image) {
 				session->http = content;
 				LOGDEBUG("Response:%u %s:%u -> %s:%u %s", tv.tv_sec, 
@@ -380,14 +384,20 @@ void _del_session_from_working_next(struct http_session* prev, struct http_sessi
 }
 void _show_debug_info(void *data)
 {
+	printf("==================================\n");
 	void* packet = data;
+	char sip[32], dip[32];
 	while (packet) {
-		struct iphdr *ip=IPHDR(packet); struct tcphdr* tcp=TCPHDR(ip); printf("[%p]flow:%u seq:%u/%u ack:%u\n", packet, FLOW_GET(tcp), tcp->seq, tcp->seq+tcp->window, tcp->ack_seq);
+		struct iphdr *ip=IPHDR(packet); struct tcphdr* tcp=TCPHDR(ip); 
+		printf("[%u] %s:%u -> %s:%u flow:%u seq:%u/%u ack:%u\n", tcp->urg_ptr, 
+				inet_ntop(AF_INET, &ip->saddr, sip, sizeof(sip)),  tcp->source,
+				inet_ntop(AF_INET, &ip->daddr, dip, sizeof(sip)),  tcp->dest,
+				FLOW_GET(tcp), tcp->seq, tcp->seq+tcp->window, tcp->ack_seq);
 		packet = *(void**)packet;
 	}
 }
 // return l>r:1; l=r:0; l<r:-1
-int _cmp_packet_(void* l, void* r)
+int _cmp_packet_seq0(void* l, void* r)
 {
 	assert(l!=r);
 	if (l==NULL) return -1;
@@ -399,19 +409,51 @@ int _cmp_packet_(void* l, void* r)
 	if (FLOW_GET(ltcp) == FLOW_GET(rtcp)) {
 		if (ltcp->seq == rtcp->seq) return 0;
 		if (ltcp->seq > rtcp->seq) {
-			if (ltcp->seq-rtcp->seq < 0x000FFFFF) {
+			if (ltcp->seq-rtcp->seq < 0x00010000) {
 				return 1;
 			} else {
 				return -1;
 			}
 		} else {
-			if (rtcp->seq-ltcp->seq < 0x000FFFFF) {
+			if (rtcp->seq-ltcp->seq < 0x00010000) {
 				return -1;
 			} else {
 				return 1;
 			}
 		}
-	} else { assert(FLOW_GET(rtcp) == S2C); }	
+	} else {
+		if (FLOW_GET(rtcp) == C2S) return 1;
+	}	
+	return -1;
+}
+// return l>r:1; l=r:0; l<r:-1
+int _cmp_packet_seq1(void* l, void* r)
+{
+	assert(l!=r);
+	if (l==NULL) return -1;
+	if (r==NULL) return -1;
+	struct iphdr* lip = IPHDR(l);
+	struct iphdr* rip = IPHDR(r);
+	struct tcphdr* ltcp = TCPHDR(lip);
+	struct tcphdr* rtcp = TCPHDR(rip); 
+	uint32_t lseq = ltcp->seq+ltcp->window;
+	uint32_t rseq = rtcp->seq+rtcp->window;
+
+	if (FLOW_GET(ltcp) == FLOW_GET(rtcp)) {
+		if (lseq == rseq) return 0;
+		if (lseq > rtcp->seq) return 0;	// I dont known why. see 20140715.log
+		if (lseq > rseq) {
+			return 0;
+		} else {
+			if (rseq-lseq < 0x00010000) {
+				return -1;
+			} else {
+				return 1;
+			}
+		}
+	} else { 
+		if (FLOW_GET(rtcp) == C2S) return 1;
+	}	
 	return -1;
 }
 // return lost bytes
@@ -427,7 +469,35 @@ int _fix_packet_order(void** data)
 		void* next = NULL;
 		while (packet) {
 			next = *(void**)packet;
-			int cmp = _cmp_packet_(packet, next); 
+			int cmp = _cmp_packet_seq0(packet, next); 
+			if (cmp == 0) {
+				*(void**)packet = *(void**)next;
+				free(next);
+			} else if (cmp < 0) {
+				prev = packet;
+				packet = next;
+			} else {
+				if (prev) {
+					*(void**)prev = next;
+				} else {
+					*data = next;
+				}
+				*(void**)packet = *(void**)next;
+				*(void**)next = packet;
+				prev = next;
+				++change;
+			}
+		}
+	} while (change);
+	do {
+		change = 0;
+		void* head = *data;
+		void* packet = head;
+		void* prev = NULL;
+		void* next = NULL;
+		while (packet) {
+			next = *(void**)packet;
+			int cmp = _cmp_packet_seq1(packet, next); 
 			if (cmp == 0) {
 				*(void**)packet = *(void**)next;
 				free(next);
@@ -466,8 +536,7 @@ void *_process_timeout(void* p)
 		count = 0;
 		while (cur)	{
 			++count;
-			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
-					|| cur->flag==HTTP_SESSION_REUSED) {
+			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET || cur->flag==HTTP_SESSION_REUSED) {
 				_del_session_from_working_next(prev, cur);
 				if (cur->http || cur->query) {
 					cur->flag = HTTP_SESSION_TIMEOUT;
@@ -564,14 +633,10 @@ void *HTTP_Thread(void* param)
 					FinishHttpSession(session, HTTP_SESSION_RESET);
 				} else if (tcphead->fin) {
 					FinishHttpSession(session, HTTP_SESSION_FINISH);
-				} else {
-					// new, so end prev. or query0 + query1
-					struct iphdr* lip = IPHDR(session->lastdata);
-					struct tcphdr* ltcp=TCPHDR(lip);
-					if (FLOW_GET(ltcp)==S2C) {	// Q.R. now finish session and create new session
+				} else { // see 20140725.log 69~86
+					if ( tcphead->seq > session->seq) {	// Q.R. now finish session and create new session
 						FinishHttpSession(session, HTTP_SESSION_FINISH);
 					} else {	// Q0.Q1.Q2...
-						assert(FLOW_GET(ltcp)==C2S);
 						AppendPacketToHttpSession(session, packet);
 						continue;
 					}
@@ -837,31 +902,37 @@ uint32_t GetHttpData(char **data)
 	// get all http_content len
 	size_t http_len = 0;
 	void* packet = pSession->data;
-	int prev_flow = 0;
-	uint32_t seq = 0u;
-	uint32_t lost = 0u;
+	uint32_t c_flow, c_seq, c_lost, s_flow, s_seq, s_lost;
+	c_flow = c_seq = c_lost = s_flow = s_seq = s_lost = 0u;
 	do {		// TODO: maybe can process breaken.
 		struct iphdr *iphead = IPHDR(packet);
 		struct tcphdr *tcphead=TCPHDR(iphead);
 		unsigned contentlen = tcphead->window;
 		assert(iphead->tot_len - iphead->ihl*4 - tcphead->doff*4==contentlen);
 		http_len += contentlen;
-		if (prev_flow == NONE) {
-			prev_flow = FLOW_GET(tcphead);
-			seq = tcphead->seq + contentlen;
-		} else {
-			if (prev_flow==FLOW_GET(tcphead)) {
-				lost = tcphead->seq - seq;
-				seq = tcphead->seq+contentlen;
+		if (FLOW_GET(tcphead) == C2S) {
+			if (c_flow == NONE) { 
+				c_flow = C2S;
+				c_seq = tcphead->seq + contentlen; 
 			} else {
-				lost = tcphead->ack_seq - seq;
-				seq = tcphead->seq+contentlen;
-			}
-			prev_flow = FLOW_GET(tcphead);
+				c_lost +=tcphead->seq - c_seq;
+				c_seq = tcphead->seq + contentlen; 
+			} 
+		} else {
+			if (s_flow == NONE) { 
+				s_flow = S2C;
+				s_seq = tcphead->seq + contentlen; 
+			} else {
+				s_lost +=tcphead->seq - s_seq;
+				s_seq = tcphead->seq + contentlen; 
+			} 
 		}
 		packet = *(void**)packet;
 	} while (packet!=NULL);
-	if (lost > 0) _debug_points();
+	if (DEBUG && (c_lost+s_lost)>0) {
+		printf("c_lost = %u s_lost = %u\n", c_lost, s_lost);
+		_show_debug_info(pSession->data);
+	}
 
 	// malloc
 	unsigned data_len = http_len+35+10+26+26+5+1;
@@ -919,7 +990,7 @@ uint32_t GetHttpData(char **data)
 	} while (packet!=NULL);
 	pSession->data = NULL;
 	
-	if (lost > 0) {
+	if (s_lost > 0) {
 		INC_UNCOMPLETE_SESSION;
 		goto NOZIP;
 	}

@@ -12,10 +12,10 @@ uint32_t packets_pop = 0u;
 uint32_t sent_count = 0u;
 uint32_t whole_html_session = 0u;
 uint32_t drop_packet_count = 0u;
-uint32_t get_post_count = 0u;
+//uint32_t get_post_count = 0u;
 uint32_t new_http_session = 0u;
 uint32_t drop_http_image = 0u;
-uint32_t http_image = 0u;
+// uint32_t http_image = 0u;
 // here isnt statis
 uint32_t packet_num = 0u;
 uint32_t session_count = 0u;
@@ -31,10 +31,10 @@ void PrintStatis()
 	P(total_pcap);
 	P(packets_pushed);
 	P(packets_pop);
-	P(get_post_count);
+	//P(get_post_count);
 	P(new_http_session);
 	P(finish_session_count);
-	P(http_image);
+	//P(http_image);
 	P(sent_count);
 	P(session_count);
 	P(whole_html_session);
@@ -47,16 +47,16 @@ void PrintStatis()
 }
 void PrintTitle()
 {
-	printf("TIME CAP PKTSIN PKTSOUT GETPOST NEWSESSION FINISHSESSION APPEND HTTPIMAGE SEND ACTSESSION WHOLE WHOLES DROPPKT NOHTTPQUERY UNCOMPLETE\n");
+	printf("TIME CAP PKTSIN PKTSOUT NEWSESSION FINISHSESSION APPEND SEND ACTSESSION WHOLE WHOLES DROPPKT NOHTTPQUERY UNCOMPLETE\n");
 }
 void PrintStati()
 {
 	time_t now = time(NULL);
 	char stime[64];
 	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
-	printf("%s|%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\n", stime, total_pcap, packets_pushed, 
-			packets_pop, get_post_count, new_http_session, finish_session_count,
-			append_packet_count, http_image, sent_count, session_count,
+	printf("%s|%u %u %u %u %u %u %u %u %u %u %u %u %u\n", stime, total_pcap, packets_pushed, 
+			packets_pop, new_http_session, finish_session_count,
+			append_packet_count, sent_count, session_count,
 			whole_html_session, whole_queue_count, drop_packet_count, drop_noquery_nohttp,
 			uncomplete_session);
 }
