@@ -192,7 +192,7 @@ void CloseOpenMonitorDevs()
 
 void ShowStati()
 {
-	if (!DEBUG) return ;
+	if (DEBUG) { return; }
 	struct pcap_stat stat;
 	pcap_stats(pcap_live[0], &stat);
 	printf("%d %d %d\n", stat.ps_drop, stat.ps_ifdrop, stat.ps_recv);

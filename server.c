@@ -573,7 +573,7 @@ void* client_thread(void *p)
 {		// TODO: send data
 	time_t active = time(NULL);
 	const int timeout = 60;
-	int datalen = 0;
+	uint32_t datalen = 0;
 	int fromdb = 0;
 	char* data = NULL;
 	while (_runing) {
