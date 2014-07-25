@@ -468,29 +468,38 @@ void *_process_timeout(void* p)
 			++count;
 			if (cur->flag==HTTP_SESSION_FINISH || cur->flag==HTTP_SESSION_RESET
 					|| cur->flag==HTTP_SESSION_REUSED) {
-				if (cur->create.tv_sec == 2682) _debug_points();
 				_del_session_from_working_next(prev, cur);
-				_fix_packet_order(&cur->data);
-				push_queue(_whole_content, cur);
+				if (cur->http || cur->query) {
+					cur->flag = HTTP_SESSION_TIMEOUT;
+					_fix_packet_order(&cur->data);
+					push_queue(_whole_content, cur);
+				} else {
+					CleanHttpSession(cur);
+					INC_DROP_SESSION_ONQUERY_NOHTTP;
+				}
 				cur = prev? prev->_work_next:_http_session_head;
 				continue;
 			} 
 			if (cur->flag==HTTP_SESSION_WAITONESEC && _http_active-cur->update.tv_sec > broken_time) {
 					LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 							index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
-				if (cur->create.tv_sec == 2682) _debug_points();
 				cur->flag = HTTP_SESSION_FINISH;
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
-				_fix_packet_order(&cur->data);
-				push_queue(_whole_content, cur);
+				if (cur->http || cur->query) {
+					cur->flag = HTTP_SESSION_TIMEOUT;
+					_fix_packet_order(&cur->data);
+					push_queue(_whole_content, cur);
+				} else {
+					CleanHttpSession(cur);
+					INC_DROP_SESSION_ONQUERY_NOHTTP;
+				}
 				cur = prev? prev->_work_next:_http_session_head;
 				continue;
 			}
 			if (_http_active-cur->update.tv_sec > g_nHttpTimeout) {
 				LOGINFO("http_session[%d] is timeout. %d - %d > %d flag=%d ", 
 						index, _http_active, cur->update.tv_sec, g_nHttpTimeout, cur->flag);
-				if (cur->create.tv_sec == 2682) _debug_points();
 				sm_DelSession(cur);
 				_del_session_from_working_next(prev, cur);
 				if (cur->http || cur->query) {
@@ -545,8 +554,6 @@ void *HTTP_Thread(void* param)
 		tcphead->ack_seq = ntohl(tcphead->ack_seq);
 		tcphead->source = ntohs(tcphead->source);
 		tcphead->dest = ntohs(tcphead->dest);
-
-		// if (*(int*)packet == 32054) {_debug_points(); }
 
 		struct http_session* session = FindHttpSession(iphead, tcphead);
 		if (FLOW_GET(tcphead)==C2S) {
