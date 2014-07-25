@@ -442,6 +442,7 @@ int _fix_packet_order(void** data)
 				}
 				*(void**)packet = *(void**)next;
 				*(void**)next = packet;
+				prev = next;
 				++change;
 			}
 		}
