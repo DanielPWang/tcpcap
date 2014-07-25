@@ -898,7 +898,8 @@ uint32_t GetHttpData(char **data)
 	assert(pSession->data != NULL);
 	
 	INC_WHOLE_HTML_SESSION;
-	
+	if (pSession->query==NULL) { INC_WHOLE_HTML_SESSION_NOQUERY; }
+	if (pSession->http ==NULL) { INC_WHOLE_HTML_SESSION_NOHTTP; }
 	// get all http_content len
 	size_t http_len = 0;
 	void* packet = pSession->data;
@@ -929,7 +930,7 @@ uint32_t GetHttpData(char **data)
 		}
 		packet = *(void**)packet;
 	} while (packet!=NULL);
-	if (DEBUG && (c_lost+s_lost)>0) {
+	if (DEBUG && (c_lost+s_lost)>pSession->packet_num) {
 		printf("c_lost = %u s_lost = %u\n", c_lost, s_lost);
 		_show_debug_info(pSession->data);
 	}

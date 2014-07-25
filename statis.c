@@ -11,6 +11,8 @@ uint32_t packets_pushed = 0u;
 uint32_t packets_pop = 0u;
 uint32_t sent_count = 0u;
 uint32_t whole_html_session = 0u;
+uint32_t whole_html_session_no_query = 0u;
+uint32_t whole_html_session_no_http = 0u;
 uint32_t drop_packet_count = 0u;
 //uint32_t get_post_count = 0u;
 uint32_t new_http_session = 0u;
@@ -38,6 +40,8 @@ void PrintStatis()
 	P(sent_count);
 	P(session_count);
 	P(whole_html_session);
+	P(whole_html_session_no_query);
+	P(whole_html_session_no_http);
 	P(drop_packet_count);
 	P(drop_http_image);
 	P(append_packet_count);
@@ -47,17 +51,18 @@ void PrintStatis()
 }
 void PrintTitle()
 {
-	printf("TIME CAP PKTSIN PKTSOUT NEWSESSION FINISHSESSION APPEND SEND ACTSESSION WHOLE WHOLES DROPPKT NOHTTPQUERY UNCOMPLETE\n");
+	printf("TIME CAP PKTSIN PKTSOUT NEWSESSION FINISHSESSION APPEND SEND ACTSESSION WHOLE NOQUERY NOHTTP WHOLES DROPPKT NOHTTPQUERY UNCOMPLETE\n");
 }
 void PrintStati()
 {
 	time_t now = time(NULL);
 	char stime[64];
 	strftime(stime, sizeof(stime), "%F %T", localtime(&now));
-	printf("%s|%u %u %u %u %u %u %u %u %u %u %u %u %u\n", stime, total_pcap, packets_pushed, 
-			packets_pop, new_http_session, finish_session_count,
-			append_packet_count, sent_count, session_count,
-			whole_html_session, whole_queue_count, drop_packet_count, drop_noquery_nohttp,
+	printf("%s|%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u\n", stime, total_pcap, packets_pushed, 
+			packets_pop, new_http_session, finish_session_count, append_packet_count, 
+			sent_count, session_count, whole_html_session, whole_html_session_no_query, 
+			whole_html_session_no_http,
+			whole_queue_count, drop_packet_count, drop_noquery_nohttp,
 			uncomplete_session);
 }
 void* _show_statis_thread(void* p)

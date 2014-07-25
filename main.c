@@ -13,6 +13,7 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <arpa/inet.h>
+#include <sched.h>
 //#include <gperftools/profiler.h>
 
 #include "utils.h"
@@ -112,12 +113,20 @@ void ProcessSIG()
 	signal(SIGUSR1, sig_usr);
 }
 
+void SetSched()
+{
+	struct sched_param param = {0};
+	param.__sched_priority = sched_get_priority_max(SCHED_FIFO);
+	int err = sched_setscheduler(getpid(), SCHED_FIFO, &param);
+}
+
 int main(int argc, char* argv[])
 {
 	ShowVersion();
 	ProcessCMD(argc, argv);
 	CheckRoot();
 	ProcessSIG();
+	SetSched();
 	CONFIG_PATH = CONFIG_PATH_FILE;
 
 	open_log("eru.log", GetValue_i(CONFIG_PATH, "loglevel"));
