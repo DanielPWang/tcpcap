@@ -6,7 +6,6 @@
 #include <libgen.h>
 #include <errno.h>
 #include <sys/types.h>
-
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
 #include <netinet/ether.h>
@@ -14,6 +13,8 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 #include <arpa/inet.h>
+#include <sched.h>
+//#include <gperftools/profiler.h>
 
 #include "utils.h"
 #include "iface.h"
@@ -112,12 +113,20 @@ void ProcessSIG()
 	signal(SIGUSR1, sig_usr);
 }
 
+void SetSched()
+{
+	struct sched_param param = {0};
+	param.__sched_priority = sched_get_priority_max(SCHED_FIFO);
+	int err = sched_setscheduler(getpid(), SCHED_FIFO, &param);
+}
+
 int main(int argc, char* argv[])
 {
 	ShowVersion();
 	ProcessCMD(argc, argv);
 	CheckRoot();
 	ProcessSIG();
+	SetSched();
 	CONFIG_PATH = CONFIG_PATH_FILE;
 
 	open_log("eru.log", GetValue_i(CONFIG_PATH, "loglevel"));
@@ -138,6 +147,7 @@ int main(int argc, char* argv[])
 	char* buffer = NULL; // = calloc(1,RECV_BUFFER_LEN);
 	int nrecv = 0;
 	
+	// ProfilerStart("./gperf.gmon");
 	while (Living) 
 	{
 		if (buffer == NULL) buffer = calloc( 8, RECV_BUFFER_LEN/8); // TODO:
@@ -147,7 +157,7 @@ int main(int argc, char* argv[])
 		if (nrecv == 0) continue;
 
 		INC_TOTAL_PCAP;
-		FRAME_NUM_SET(buffer);
+		if (DEBUG) { FRAME_NUM_SET(buffer); }
 
 		struct ether_header *ehead = (struct ether_header*)buffer;
 		u_short eth_type = ntohs(ehead->ether_type); // TODO: stupid.
@@ -160,6 +170,7 @@ int main(int argc, char* argv[])
 
 			if (iphead->protocol == IPPROTO_TCP) {
 				struct tcphdr *tcphead = TCPHDR(iphead);
+				if (DEBUG) { tcphead->urg_ptr = packet_num; }
 
 				// Http filter.
 				if (FilterPacketForHttp(buffer, iphead, tcphead) >= 0) {
@@ -168,11 +179,15 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
+	ShowStati();
+	// ProfilerFlush();
 	LOGINFO0("ready to exit...");
 	HttpStop();
 	StopServer();
 	LOGINFO0("exit server...");
+	// ProfilerStop();
 	close_log();
+	StopShowStatis();
 	PrintStatis();
 	return 0;
 }

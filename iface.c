@@ -32,7 +32,8 @@ extern volatile int Living;
 int open_monitor(const char* interface, const char* fliter)
 {
 	char* errbuff = (char*)malloc(PCAP_ERRBUF_SIZE);
-	pcap_t *p = pcap_open_live(interface, 65535, 1, 0, errbuff);
+	pcap_t *p = pcap_open_live(interface, RECV_BUFFER_LEN, 1, 0, errbuff);
+	pcap_live[_active_sock] = p;
 	if (p == NULL) {
 		LOGFATAL("Cannt open %s [%s]", interface, errbuff);
 		abort();
@@ -78,6 +79,7 @@ int OpenPcapFile(const char* pcapfile, const char* filter)
 
 	pcap_freecode(&fp);
 	free(errbuff);
+	free((void*)filter);
 	return 1;
 }
 
@@ -103,11 +105,13 @@ int OpenMonitorDevs()
 	char *left = value;
 	char *right = NULL;
 
+	struct timeval timeout = { 5, 0 };
 	for (; _active_sock<=MONITOR_COUNT ; left=NULL)
 	{
 		left = strtok_r(left, " ", &right);
 		if (left == NULL) break;
 		SockMonitor[_active_sock] = open_monitor(left, "");
+		setsockopt(SockMonitor[_active_sock], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 		if (SockMonitor[_active_sock] > 0) {
 			LOGINFO("open interface %s", left);
 			ev.events = EPOLLIN;
@@ -155,15 +159,23 @@ int CapturePacket(char* buffer, size_t size)
 	assert(_epollfd > 0);
 	assert(_active_sock > 0);
 
-	int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
-	if (nfds < 1 ) return 0;	// test exit.
+	int nRecv = 0;
+	if (_active_sock == 1) {
+		struct sockaddr_in sa;
+		socklen_t salen = sizeof(sa);
 
-	struct sockaddr_in sa;
-	socklen_t salen = sizeof(sa);
+		nRecv = recvfrom(SockMonitor[0], buffer, size, 0, (struct sockaddr*)&sa, &salen);
+		if (nRecv == -1) { nRecv = 0; }
+	} else {
+		int nfds = epoll_wait(_epollfd, _events, _active_sock, -1);
+		if (nfds < 1 ) return 0;	// test exit.
 
-	int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
-	if (nRecv == -1) { return 0; }
+		struct sockaddr_in sa;
+		socklen_t salen = sizeof(sa);
 
+		int nRecv = recvfrom(_events[0].data.fd, buffer, size, 0, (struct sockaddr*)&sa, &salen);
+		if (nRecv == -1) { nRecv=0; }
+	}
 	return nRecv;
 }
 
@@ -178,3 +190,10 @@ void CloseOpenMonitorDevs()
 	_epollfd = 0;
 }
 
+void ShowStati()
+{
+	if (DEBUG) { return; }
+	struct pcap_stat stat;
+	pcap_stats(pcap_live[0], &stat);
+	printf("%d %d %d\n", stat.ps_drop, stat.ps_ifdrop, stat.ps_recv);
+}

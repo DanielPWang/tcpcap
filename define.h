@@ -18,16 +18,13 @@ extern const char* CONFIG_PATH;
 extern int DEBUG;
 
 // capture
-#define RECV_BUFFER_LEN   4000 // 8192
+#define RECV_BUFFER_LEN   2400 // 8192
 
 #define MAX_BLOCK_ITEM 500
 // HTTP
 #define MAX_HTTP_SESSIONS 6000
 #define MAX_HTTP_PACKETS  20000
-#define HTTP_TIMEOUT      8	// s
-//#define MAX_HTTP_SESSIONS 2000
-//#define MAX_HTTP_PACKETS  5000
-//#define HTTP_TIMEOUT      25	// s
+#define HTTP_TIMEOUT      15	// s
 
 #define MAX_LATER_PACKETS 40
 

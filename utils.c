@@ -12,6 +12,7 @@
 #include <time.h>
 #include <execinfo.h>
 #include <errno.h>
+//#include <syslog.h>
 #include <limits.h>
 
 #include <utils.h>
@@ -170,11 +171,16 @@ int logmsg(int level, const char* fmt, ... )
 {
 	static const char* _LOG_LEVEL[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
 
-	assert(level>-1 && level<sizeof(_LOG_LEVEL)/sizeof(_LOG_LEVEL[0]));
+	// assert(level>-1 && level<sizeof(_LOG_LEVEL)/sizeof(_LOG_LEVEL[0]));
 	assert(_logfd != NULL);
 
 	if (level < _level) return 0;
 
+	/* va_list ap1;
+	va_start(ap1, fmt);
+	vsyslog( LOG_USER | (5-level), fmt, ap1);
+	va_end(ap1);
+	return 0; */
 	time_t now = time(NULL);
 	struct tm t;
 	char timebuf[30];
@@ -187,11 +193,11 @@ int logmsg(int level, const char* fmt, ... )
 	va_start(ap, fmt);
 
 	fprintf(_logfd, "%s %s: ", timebuf, _LOG_LEVEL[level]);
-	if (level>2) fprintf(stdout, "%s %s: ", timebuf, _LOG_LEVEL[level]);
+	// if (level>2) fprintf(stdout, "%s %s: ", timebuf, _LOG_LEVEL[level]);
 	int nRet = vfprintf(_logfd, fmt, ap);
-	if (level>2) vfprintf(stdout, fmt, ap);
+	// if (level>2) vfprintf(stdout, fmt, ap);
 	fprintf(_logfd, "\n");
-	if (level>2) fprintf(stdout, "\n");
+	// if (level>2) fprintf(stdout, "\n");
 
 	va_end(ap);
 

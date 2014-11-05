@@ -2,8 +2,8 @@
 #define __IFACE_H__
 
 int OpenMonitorDevs();
-
 int CapturePacket(char* buffer, size_t size);
+void ShowStati();
 
 #endif
 

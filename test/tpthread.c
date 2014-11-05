@@ -43,7 +43,12 @@ int main(int argc, char* argv[])
 	a = b =c =d =e =f =g =h =i =j;
 	int array[10] = {0};
 	AO_t A = AO_TS_INITIALIZER;
+	void* p = NULL;
+	void **p0=NULL;
+	if (
 	for (; count < 0xFFFFFFFF; ++count) {
+		void* p = malloc(1600);
+		free(p);
 		//AO_fetch_and_add1(&A);
 		// sum += 1;
 		//pthread_mutex_lock(&mtx_);
