@@ -42,7 +42,7 @@ void sig_int(int signo)
 	LOGINFO0("Recv signal to exit...");
 	Living = 0;
 }
-
+	pcap_breakloop(pcap_handle);
 void sig_segv(int signo)
 {
 	print_bt();

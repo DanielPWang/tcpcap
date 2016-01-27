@@ -3,7 +3,6 @@
 #include <string.h>
 #include <assert.h>
 #include "utils.h"
-#include <config.h>
 
 #define CONF_NAME_LEN 128
 
